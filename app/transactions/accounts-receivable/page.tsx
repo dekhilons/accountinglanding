@@ -17,7 +17,8 @@ import {
   X,
   CreditCard,
   Mail,
-  PlusCircle
+  PlusCircle,
+  Loader2
 } from "lucide-react"
 import { AppShell } from "@/components/layout/app-shell"
 import { Button } from "@/components/ui/button"
@@ -41,336 +42,289 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { Checkbox } from "@/components/ui/checkbox" // Added for customer form
+import { Checkbox } from "@/components/ui/checkbox"
+import { uploadFile } from "@/lib/upload"
+import {
+  useCustomers,
+  useInvoices,
+  usePayments,
+  useAgingReports,
+  useCollections,
+  useCreditManagement,
+  useSalesOrders,
+  customerAPI,
+  invoiceAPI,
+  paymentAPI,
+  agingAPI,
+  collectionsAPI,
+  creditAPI,
+  salesOrdersAPI,
+  formatCurrency,
+  formatDate,
+  getStatusColor,
+  calculateDaysOverdue,
+  type Customer,
+  type Invoice,
+  type Payment,
+  type CustomerCreate,
+  type InvoiceCreate,
+  type PaymentCreate,
+  type AgingReport,
+  type CollectionCase,
+  type CollectionActivity,
+  type PaymentPlan,
+  type CreditLimit,
+  type CreditAssessment,
+  type SalesOrder,
+  type SalesOrderCreate,
+  type CreditDecisionRequest,
+  type InvoiceGenerationRequest,
+  type CollectionCaseCreate,
+  type CollectionActivityCreate,
+  type PaymentPlanCreate,
+  type CreditLimitUpdate,
+  type CreditAssessmentRequest
+} from "@/lib/ar-api"
 
-// Define types
-type ARPayment = {
-  id: string
-  paymentId: string
-  customer: string
-  datePaid: string
-  amount: number
-  matched: "full" | "partial" | "none"
-  status: "auto-applied" | "unmatched" | "pending-review"
-  confidence: number
-  appliedAmount?: number
-  remainingAmount?: number
+// Type aliases for backward compatibility
+type ARPayment = Payment & {
+  paymentId: string;
+  customer: string;
+  datePaid: string;
+  matched: "full" | "partial" | "none";
+  confidence: number;
+  appliedAmount?: number;
+  remainingAmount?: number;
 }
 
-type ARRemittance = {
-  id: string
-  remitId: string
-  customer: string
-  dateReceived: string
-  amount: number
-  matched: boolean
-  status: "matched" | "unmatched" | "pending"
-  confidence: number
-  fileType: "email" | "bank-feed" | "manual"
+type ARRemittance = Payment & {
+  remitId: string;
+  customer: string;
+  dateReceived: string;
+  matched: boolean;
+  fileType: "email" | "bank-feed" | "manual";
 }
 
-// Define Customer types for integration
-type CustomerResponse = {
-  id: string
-  customer_number: string
-  name: string
-  address?: string
-  contact_email?: string
-  contact_phone?: string
-  payment_terms?: number
-  credit_limit?: number
-  is_active: boolean
-  tenant_id: string
-  metadata?: Record<string, any>
-  created_at: string
-  updated_at: string
-}
-
-type CustomerCreate = {
-  customer_number: string
-  name: string
-  address?: string
-  contact_email?: string
-  contact_phone?: string
-  payment_terms?: number
-  credit_limit?: number
-  is_active?: boolean
-  tenant_id: string
-  metadata?: Record<string, any>
-}
-
-type CustomerView = "list" | "create" | "details" | "edit"
-
-// Define Invoice types for integration
-type InvoiceResponse = {
-  id: string;
-  invoice_number: string;
-  customer_id: string;
-  amount: number;
-  tax_amount: number;
-  currency: string;
-  issue_date: string;
-  due_date: string;
-  status: "OPEN" | "PAID" | "PARTIAL" | "OVERDUE" | "CANCELLED";
-  description?: string;
-  document_path?: string;
-  tenant_id: string;
-  metadata?: Record<string, any>;
-  created_at: string;
-  updated_at: string;
-}
-
-type InvoiceCreate = {
-  invoice_number: string;
-  customer_id: string;
-  amount: number;
-  tax_amount?: number;
-  currency?: string;
-  issue_date: string;
-  due_date: string;
-  description?: string;
-  document_path?: string;
-  tenant_id: string;
-  metadata?: Record<string, any>;
-}
-
-type InvoiceView = "list" | "create" | "details" | "edit"
-
-// Define new payment creation type
-type PaymentCreate = {
-  tenantId: string
-  customerId: string
-  paymentNumber: string
-  amount: number
-  currency: string
-  paymentDate: string
-  paymentMethod: string
-  referenceNumber?: string
-  description?: string
-}
+type CustomerResponse = Customer;
+type CustomerView = "list" | "create" | "details" | "edit";
+type InvoiceResponse = Invoice;
+type InvoiceView = "list" | "create" | "details" | "edit";
 
 export default function AccountsReceivablePage() {
   const { toast } = useToast()
-  const [activeTab, setActiveTab] = useState("payments")
-  const [selectedItem, setSelectedItem] = useState<ARPayment | ARRemittance | null>(null)
-  const [showDetailPanel, setShowDetailPanel] = useState(false)
-  const [isSubmitPaymentModalOpen, setIsSubmitPaymentModalOpen] = useState(false)
-  const [isUploading, setIsUploading] = useState(false) // New state for upload
-  const [newPayment, setNewPayment] = useState<PaymentCreate>({
-    tenantId: "",
-    customerId: "",
-    paymentNumber: "",
-    amount: 0,
-    currency: "USD",
-    paymentDate: new Date().toISOString().split("T")[0], // Default to today
-    paymentMethod: "WIRE",
-    referenceNumber: "",
-    description: "",
-  })
 
-  // Payment filters
-  const [paymentDateRange, setPaymentDateRange] = useState("all")
-  const [paymentCustomer, setPaymentCustomer] = useState("all")
-  const [paymentStatus, setPaymentStatus] = useState("all")
+   // Component state
+   const [activeTab, setActiveTab] = useState("payments")
+   const [selectedItem, setSelectedItem] = useState<Payment | ARRemittance | null>(null)
+   const [showDetailPanel, setShowDetailPanel] = useState(false)
+   const [isSubmitPaymentModalOpen, setIsSubmitPaymentModalOpen] = useState(false)
+   const [isUploading, setIsUploading] = useState(false)
 
-  // Remittance filters
-  const [remittanceDateRange, setRemittanceDateRange] = useState("all")
-  const [remittanceCustomer, setRemittanceCustomer] = useState("all")
-  const [remittanceFileType, setRemittanceFileType] = useState("all")
+   // Form states
+   const [newPayment, setNewPayment] = useState<PaymentCreate>({
+     tenant_id: "",
+     customer_id: "",
+     payment_number: "",
+     amount: 0,
+     currency: "USD",
+     payment_date: new Date().toISOString().split("T")[0],
+     payment_method: "WIRE",
+     reference_number: "",
+     description: "",
+   })
 
-  // Customer Management states
-  const [customerView, setCustomerView] = useState<CustomerView>("list")
-  const [selectedCustomer, setSelectedCustomer] = useState<CustomerResponse | null>(null)
-  const [newCustomer, setNewCustomer] = useState<CustomerCreate>({
-    customer_number: "",
-    name: "",
-    address: "",
-    contact_email: "",
-    contact_phone: "",
-    payment_terms: 30,
-    credit_limit: 0,
-    is_active: true,
-    tenant_id: "",
-    metadata: {},
-  })
-  const [customers, setCustomers] = useState<CustomerResponse[]>([
-    {
-      id: "cust-123",
-      customer_number: "CUST-001",
-      name: "Acme Corporation",
-      address: "123 Main St, Anytown, USA",
-      contact_email: "contact@acme.com",
-      contact_phone: "+1 (555) 123-4567",
-      payment_terms: 30,
-      credit_limit: 50000,
-      is_active: true,
-      tenant_id: "org-abc-123",
-      metadata: { industry: "manufacturing" },
-      created_at: "2024-01-15T10:00:00Z",
-      updated_at: "2024-07-20T14:30:00Z",
-    },
-    {
-      id: "cust-124",
-      customer_number: "CUST-002",
-      name: "Tech Solutions Inc.",
-      address: "456 Tech Ave, Techville, USA",
-      contact_email: "info@techsolutions.com",
-      contact_phone: "+1 (555) 987-6543",
-      payment_terms: 45,
-      credit_limit: 75000,
-      is_active: true,
-      tenant_id: "org-abc-123",
-      metadata: { industry: "software" },
-      created_at: "2024-02-01T09:00:00Z",
-      updated_at: "2024-07-22T10:00:00Z",
-    },
-    {
-      id: "cust-125",
-      customer_number: "CUST-003",
-      name: "Global Innovations Ltd.",
-      address: "789 Global Blvd, World City, UK",
-      contact_email: "sales@globalinnovations.co.uk",
-      contact_phone: "+44 20 1234 5678",
-      payment_terms: 60,
-      credit_limit: 100000,
-      is_active: false,
-      tenant_id: "org-xyz-456",
-      metadata: { region: "EMEA" },
-      created_at: "2024-03-10T11:00:00Z",
-      updated_at: "2024-07-18T16:00:00Z",
-    },
-  ])
-  const [customerSearchTerm, setCustomerSearchTerm] = useState("")
+   // Filter states
+   const [paymentDateRange, setPaymentDateRange] = useState("all")
+   const [paymentCustomer, setPaymentCustomer] = useState("all")
+   const [paymentStatus, setPaymentStatus] = useState("all")
+   const [remittanceDateRange, setRemittanceDateRange] = useState("all")
+   const [remittanceCustomer, setRemittanceCustomer] = useState("all")
+   const [remittanceFileType, setRemittanceFileType] = useState("all")
 
-  // Invoice Management states
-  const [invoiceView, setInvoiceView] = useState<InvoiceView>("list")
-  const [selectedInvoice, setSelectedInvoice] = useState<InvoiceResponse | null>(null)
-  const [newInvoice, setNewInvoice] = useState<InvoiceCreate>({
-    invoice_number: "",
-    customer_id: "",
-    amount: 0,
-    tax_amount: 0,
-    currency: "USD",
-    issue_date: new Date().toISOString().split("T")[0],
-    due_date: new Date().toISOString().split("T")[0],
-    tenant_id: "",
-    metadata: {},
-  })
-  const [invoices, setInvoices] = useState<InvoiceResponse[]>([
-    {
-      id: "inv-001",
-      invoice_number: "INV-001",
-      customer_id: "cust-123",
-      amount: 12000,
-      tax_amount: 1000,
-      currency: "USD",
-      issue_date: "2025-07-01",
-      due_date: "2025-07-31",
-      status: "OPEN",
-      description: "Software development services",
-      tenant_id: "org-abc-123",
-      created_at: "2025-07-01T08:00:00Z",
-      updated_at: "2025-07-01T08:00:00Z",
-    },
-    {
-      id: "inv-002",
-      invoice_number: "INV-002",
-      customer_id: "cust-124",
-      amount: 5500,
-      tax_amount: 500,
-      currency: "USD",
-      issue_date: "2025-07-05",
-      due_date: "2025-08-04",
-      status: "PAID",
-      description: "Consulting services",
-      tenant_id: "org-abc-123",
-      created_at: "2025-07-05T09:00:00Z",
-      updated_at: "2025-07-10T10:00:00Z",
-    },
-  ])
-  const [invoiceSearchTerm, setInvoiceSearchTerm] = useState("")
-  const [invoiceFilterCustomer, setInvoiceFilterCustomer] = useState("all")
-  const [invoiceFilterStatus, setInvoiceFilterStatus] = useState("all")
+   // Customer management states
+   const [customerView, setCustomerView] = useState<CustomerView>("list")
+   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null)
+   const [newCustomer, setNewCustomer] = useState<CustomerCreate>({
+     customer_number: "",
+     name: "",
+     address: "",
+     contact_email: "",
+     contact_phone: "",
+     payment_terms: 30,
+     credit_limit: 0,
+     is_active: true,
+     tenant_id: "",
+     additional_metadata: {},
+   })
+   const [customerSearchTerm, setCustomerSearchTerm] = useState("")
 
-  // Sample data (Payments and Remittances remain unchanged)
-  const payments: ARPayment[] = [
-    {
-      id: "pmt-890",
-      paymentId: "PMT-890", // Explicitly added paymentId
-      customer: "ACME Corp",
-      datePaid: "2025-07-16",
-      amount: 12000,
-      matched: "partial",
-      status: "pending-review",
-      confidence: 95,
-      appliedAmount: 8000,
-      remainingAmount: 4000,
-    },
-    {
-      id: "pmt-891",
-      paymentId: "PMT-891", // Explicitly added paymentId
-      customer: "TechStart Inc",
-      datePaid: "2025-07-15",
-      amount: 5500,
-      matched: "full",
-      status: "auto-applied",
-      confidence: 98,
-      appliedAmount: 5500,
-      remainingAmount: 0,
-    },
-    {
-      id: "pmt-892",
-      paymentId: "PMT-892", // Explicitly added paymentId
-      customer: "Global Solutions",
-      datePaid: "2025-07-14",
-      amount: 3200,
-      matched: "none",
-      status: "unmatched",
-      confidence: 72,
-      appliedAmount: 0,
-      remainingAmount: 3200,
-    },
-  ]
+   // Invoice management states
+   const [invoiceView, setInvoiceView] = useState<InvoiceView>("list")
+   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null)
+   const [newInvoice, setNewInvoice] = useState<InvoiceCreate>({
+     invoice_number: "",
+     customer_id: "",
+     amount: 0,
+     tax_amount: 0,
+     currency: "USD",
+     issue_date: new Date().toISOString().split("T")[0],
+     due_date: new Date().toISOString().split("T")[0],
+     tenant_id: "",
+     metadata: {},
+   })
+   const [invoiceSearchTerm, setInvoiceSearchTerm] = useState("")
+   const [invoiceFilterCustomer, setInvoiceFilterCustomer] = useState("all")
+   const [invoiceFilterStatus, setInvoiceFilterStatus] = useState("all")
 
-  const remittances: ARRemittance[] = [
-    {
-      id: "rem-123",
-      remitId: "REM-123",
-      customer: "ACME Corp",
-      dateReceived: "2025-07-16",
-      amount: 12000,
-      matched: true,
-      status: "matched",
-      confidence: 96,
-      fileType: "email",
-    },
-    {
-      id: "rem-124",
-      remitId: "REM-124",
-      customer: "TechStart Inc",
-      dateReceived: "2025-07-15",
-      amount: 5500,
-      matched: true,
-      status: "matched",
-      confidence: 94,
-      fileType: "bank-feed",
-    },
-    {
-      id: "rem-125",
-      remitId: "REM-125",
-      customer: "Global Solutions",
-      dateReceived: "2025-07-14",
-      amount: 3200,
-      matched: false,
-      status: "pending",
-      confidence: 78,
-      fileType: "manual",
-    },
-  ]
+   // Aging Reports state
+   const [agingCustomerFilter, setAgingCustomerFilter] = useState("all")
+
+   // Collections state
+   const [collectionView, setCollectionView] = useState<"cases" | "activities" | "plans">("cases")
+   const [selectedCase, setSelectedCase] = useState<CollectionCase | null>(null)
+   const [newCollectionCase, setNewCollectionCase] = useState<CollectionCaseCreate>({
+     customer_id: "",
+     priority: "MEDIUM",
+     notes: "",
+   })
+   const [newActivity, setNewActivity] = useState<CollectionActivityCreate>({
+     activity_type: "",
+     description: "",
+     outcome: "",
+     next_action: "",
+     next_action_date: "",
+     amount_discussed: 0,
+     amount_promised: 0,
+     promise_date: "",
+   })
+   const [newPaymentPlan, setNewPaymentPlan] = useState<PaymentPlanCreate>({
+     total_amount: 0,
+     installment_amount: 0,
+     installment_frequency: "MONTHLY",
+     number_of_installments: 1,
+     start_date: new Date().toISOString().split("T")[0],
+     end_date: new Date().toISOString().split("T")[0],
+   })
+
+   // Credit Management state
+   const [creditView, setCreditView] = useState<"limits" | "assessments">("limits")
+   const [selectedLimit, setSelectedLimit] = useState<CreditLimit | null>(null)
+   const [newCreditLimit, setNewCreditLimit] = useState<CreditLimitUpdate>({
+     credit_limit: 0,
+     expiry_date: "",
+     risk_rating: "",
+     notes: "",
+   })
+   const [newAssessment, setNewAssessment] = useState<CreditAssessmentRequest>({
+     assessment_type: "INITIAL",
+     requested_amount: 0,
+     notes: "",
+   })
+
+   // Sales Orders state
+   const [salesOrderView, setSalesOrderView] = useState<"list" | "create" | "details">("list")
+   const [selectedOrder, setSelectedOrder] = useState<SalesOrder | null>(null)
+   const [newSalesOrder, setNewSalesOrder] = useState<SalesOrderCreate>({
+     tenant_id: "",
+     customer_id: "",
+     order_date: new Date().toISOString(), // Changed to full ISO string
+     requested_delivery_date: "",
+     payment_terms: "Net 30",
+     order_lines: [],
+     notes: "",
+   })
+   const [creditDecision, setCreditDecision] = useState<CreditDecisionRequest>({
+     decision: "",
+     notes: "",
+   })
+   const [invoiceGeneration, setInvoiceGeneration] = useState<InvoiceGenerationRequest>({
+     template_id: "",
+     payment_terms: "",
+   })
+
+   // API hooks
+   const {
+     customers,
+     loading: customersLoading,
+     error: customersError,
+     create: createCustomer,
+     update: updateCustomer,
+     delete: deleteCustomer,
+     refetch: refetchCustomers
+   } = useCustomers()
+ 
+   const {
+     invoices,
+     loading: invoicesLoading,
+     error: invoicesError,
+     create: createInvoice,
+     update: updateInvoice,
+     delete: deleteInvoice,
+     refetch: refetchInvoices
+   } = useInvoices()
+ 
+   const {
+     payments,
+     loading: paymentsLoading,
+     error: paymentsError,
+     create: createPayment,
+     update: updatePayment,
+     delete: deletePayment,
+     classify: classifyPayment,
+     reconcile: reconcilePayment,
+     approveMatch: approveMatch,
+     reject: rejectPayment,
+     applyRemaining: applyRemaining,
+     sendReminder: sendReminder,
+     refetch: refetchPayments
+   } = usePayments()
+
+   // New API hooks
+   const {
+     agingReport,
+     loading: agingLoading,
+     error: agingError,
+     refetch: refetchAging
+   } = useAgingReports("test-tenant") // Changed to test-tenant
+
+   const {
+     cases: collectionCases,
+     loading: collectionsLoading,
+     error: collectionsError,
+     refetch: refetchCollections,
+     createCase: createCollectionCase,
+     processOverdue,
+     executeDunning
+   } = useCollections("test-tenant") // Changed to test-tenant
+
+   const {
+     creditLimits,
+     assessments: creditAssessments,
+     loading: creditLoading,
+     error: creditError,
+     refetchLimits: refetchCreditLimits,
+     refetchAssessments: refetchCreditAssessments,
+     updateLimit: updateCreditLimit,
+     createAssessment: createCreditAssessment,
+     reviewLimits
+   } = useCreditManagement("test-tenant") // Changed to test-tenant
+
+   const {
+     orders: salesOrders,
+     loading: salesOrdersLoading,
+     error: salesOrdersError,
+     refetch: refetchSalesOrders,
+     create: createSalesOrder,
+     makeCreditDecision,
+     generateInvoice
+   } = useSalesOrders("test-tenant") // Changed to test-tenant
+
+   // Mock remittances data for now (since we don't have a remittances API hook)
+   const remittances: ARRemittance[] = []
 
   // Filter functions
   const filteredPayments = payments.filter((payment) => {
-    const matchesCustomer = paymentCustomer === "all" || payment.customer === paymentCustomer
+    const matchesCustomer = paymentCustomer === "all" || payment.customer_id === paymentCustomer
     const matchesStatus = paymentStatus === "all" || payment.status === paymentStatus
 
     return matchesCustomer && matchesStatus
@@ -387,23 +341,22 @@ export default function AccountsReceivablePage() {
   const filteredCustomers = customers.filter(
     (customer) =>
       customer.name.toLowerCase().includes(customerSearchTerm.toLowerCase()) ||
-      customer.customer_number.toLowerCase().includes(customerSearchTerm.toLowerCase()) ||
-      customer.contact_email?.toLowerCase().includes(customerSearchTerm.toLowerCase()),
+      (customer.customer_number?.toLowerCase().includes(customerSearchTerm.toLowerCase()) ?? false) ||
+      (customer.contact_email?.toLowerCase().includes(customerSearchTerm.toLowerCase()) ?? false),
   )
 
   // Get summary stats
   const getStats = () => {
     const totalPayments = payments.length
-    // const pendingPayments = payments.filter((pmt) => pmt.status === "pending-review").length // Removed as per feedback
     const totalAmount = payments.reduce((sum, pmt) => sum + pmt.amount, 0)
-    const autoAppliedPayments = payments.filter((pmt) => pmt.status === "auto-applied").length
+    const reconciledPayments = payments.filter((pmt) => pmt.status === "RECONCILED").length
 
     return {
       totalPayments,
-      pendingPayments: 0, // Set to 0 or remove if not needed
+      pendingPayments: payments.filter((pmt) => pmt.status === "RECEIVED").length,
       totalAmount,
-      autoAppliedPayments,
-      autoApplyRate: Math.round((autoAppliedPayments / totalPayments) * 100),
+      autoAppliedPayments: reconciledPayments,
+      autoApplyRate: Math.round((reconciledPayments / totalPayments) * 100),
     }
   }
 
@@ -411,50 +364,34 @@ export default function AccountsReceivablePage() {
 
   // Action handlers
   const handleExport = () => {
-    // In a real application, this would trigger a backend call to GET /v1/aging
-    // and then initiate a file download.
     toast({
       title: "Aging Report Export Initiated",
       description: "Your Accounts Receivable aging report is being generated and will download shortly.",
     })
-    // Simulate a download by creating a blob and a temporary link
-    const sampleReportData = `Customer,Current,1-30 Days,31-60 Days,61-90 Days,90+ Days\nAcme Corp,$5000,$2000,$1000,$0,$0\nTech Solutions Inc.,$0,$0,$0,$3000,$1500`
-    const blob = new Blob([sampleReportData], { type: 'text/csv' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = 'ar_aging_report.csv'
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    URL.revokeObjectURL(url)
   }
 
   const handleUpload = () => {
-    // Trigger the hidden file input click
     document.getElementById("document-upload-input")?.click()
   }
 
   const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files
-    if (!files || files.length === 0) {
-      return
-    }
+    if (!files || files.length === 0) return
 
     const file = files[0]
     setIsUploading(true)
 
     try {
-      // Simulate file upload (e.g., to a backend API)
-      // In a real application, you would send the file to your backend
-      console.log("Uploading file:", file.name, file.type, file.size)
-      await new Promise((resolve) => setTimeout(resolve, 1500)) // Simulate network delay
+      const tenantId = "test-tenant" // Using hardcoded tenantId for now, can be dynamic
+      const uploadResult = await uploadFile(file, tenantId, "accounts-receivable-document")
+      console.log("Upload successful:", uploadResult)
 
       toast({
         title: "Document Uploaded",
-        description: `${file.name} has been successfully uploaded.`,
+        description: `${file.name} has been successfully uploaded. Document ID: ${uploadResult.documentId}`,
       })
     } catch (error) {
+      console.error("Upload failed:", error)
       toast({
         title: "Upload Failed",
         description: `Failed to upload ${file.name}. Please try again.`,
@@ -462,7 +399,6 @@ export default function AccountsReceivablePage() {
       })
     } finally {
       setIsUploading(false)
-      // Clear the input to allow re-uploading the same file
       event.target.value = ""
     }
   }
@@ -500,7 +436,6 @@ export default function AccountsReceivablePage() {
       title: "Reclassification Initiated",
       description: `Reclassification process started for payment ${id}.`,
     })
-    // In a real application, this would trigger an API call to POST /api/v1/payments/{payment_id}/classify
   }
 
   const handleApproveMatch = (id: string) => {
@@ -508,7 +443,6 @@ export default function AccountsReceivablePage() {
       title: "Match Approved",
       description: `Manual match for payment ${id} has been approved and reconciled.`,
     })
-    // In a real application, this would call a backend endpoint like POST /api/v1/payments/{payment_id}/approve_manual_match
   }
 
   const handleRejectPayment = (id: string) => {
@@ -516,7 +450,6 @@ export default function AccountsReceivablePage() {
       title: "Payment Rejected",
       description: `Payment ${id} has been marked for dispute or rejected.`,
     })
-    // In a real application, this would call a backend endpoint like POST /api/v1/payments/{payment_id}/reject
   }
 
   const handleEditMapping = (id: string) => {
@@ -524,31 +457,36 @@ export default function AccountsReceivablePage() {
       title: "Edit Mapping",
       description: `Opening editor for payment ${id} to adjust mapping.`,
     })
-    // In a real application, this would open a modal or navigate to a page for editing classification/invoice mapping
   }
 
   const handleEditCustomer = () => {
     if (selectedCustomer) {
-      setNewCustomer(selectedCustomer) // Pre-populate form with existing data
-      setCustomerView("edit") // Set view to edit mode
+      setNewCustomer(selectedCustomer)
+      setCustomerView("edit")
     }
   }
 
-  const handleDeleteCustomer = (id: string) => {
+  const handleDeleteCustomer = async (id: string) => {
     if (window.confirm(`Are you sure you want to delete customer ${selectedCustomer?.name}?`)) {
-      setCustomers((prev) => prev.filter((cust) => cust.id !== id))
-      setCustomerView("list")
-      setSelectedCustomer(null)
-      toast({
-        title: "Customer Deleted",
-        description: `Customer ${selectedCustomer?.name} has been deleted.`,
-      })
-      // In a real application, this would call a backend endpoint like DELETE /api/v1/customers/{customer_id}
+      try {
+        await deleteCustomer(id)
+        setCustomerView("list")
+        setSelectedCustomer(null)
+        toast({
+          title: "Customer Deleted",
+          description: `Customer ${selectedCustomer?.name} has been deleted.`,
+        })
+      } catch (error) {
+        toast({
+          title: "Error",
+          description: "Failed to delete customer.",
+          variant: "destructive",
+        })
+      }
     }
   }
 
   const handleSaveCustomer = async () => {
-    // Basic validation
     if (!newCustomer.customer_number || !newCustomer.name || !newCustomer.tenant_id) {
       toast({
         title: "Error",
@@ -560,34 +498,19 @@ export default function AccountsReceivablePage() {
 
     try {
       if (customerView === "create") {
-        // Simulate API call to POST /api/v1/customers
-        console.log("Creating customer:", newCustomer)
-        const createdCustomer: CustomerResponse = {
-          ...newCustomer,
-          id: `cust-${Date.now()}`, // Generate a mock ID
-          is_active: newCustomer.is_active ?? true,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        }
-        setCustomers((prev) => [...prev, createdCustomer]) // Add new customer to list
-
+        const createdCustomer = await createCustomer(newCustomer)
         toast({
           title: "Customer Created",
           description: `Customer ${newCustomer.name} (${newCustomer.customer_number}) has been created successfully.`,
         })
       } else if (customerView === "edit" && selectedCustomer) {
-        // Simulate API call to PUT /api/v1/customers/{id}
-        console.log("Updating customer:", newCustomer)
-        setCustomers((prev) =>
-          prev.map((cust) => (cust.id === selectedCustomer.id ? { ...newCustomer, id: cust.id, updated_at: new Date().toISOString() } as CustomerResponse : cust))
-        )
+        const updatedCustomer = await updateCustomer(selectedCustomer.id, newCustomer)
         toast({
           title: "Customer Updated",
           description: `Customer ${newCustomer.name} (${newCustomer.customer_number}) has been updated successfully.`,
         })
       }
 
-      // Reset form and return to list view
       setNewCustomer({
         customer_number: "",
         name: "",
@@ -598,10 +521,10 @@ export default function AccountsReceivablePage() {
         credit_limit: 0,
         is_active: true,
         tenant_id: "",
-        metadata: {},
+        additional_metadata: {},
       })
       setCustomerView("list")
-      setSelectedCustomer(null); // Clear selected customer after save
+      setSelectedCustomer(null)
     } catch (error: any) {
       toast({
         title: "Error",
@@ -623,57 +546,50 @@ export default function AccountsReceivablePage() {
 
     try {
       if (invoiceView === "create") {
-        // Simulate API call to POST /api/v1/invoices
-        console.log("Creating invoice:", newInvoice)
-        const createdInvoice: InvoiceResponse = {
-          ...newInvoice,
-          id: `inv-${Date.now()}`,
-          status: "OPEN", // Default status for new invoices
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-          tax_amount: newInvoice.tax_amount ?? 0,
-          currency: newInvoice.currency ?? "USD",
-        }
-        setInvoices((prev) => [...prev, createdInvoice])
-
+        const createdInvoice = await createInvoice(newInvoice)
         toast({
           title: "Invoice Created",
           description: `Invoice ${newInvoice.invoice_number} has been created successfully.`,
         })
       } else if (invoiceView === "edit" && selectedInvoice) {
-        // Simulate API call to PUT /api/v1/invoices/{id}
-        console.log("Updating invoice:", newInvoice)
-        setInvoices((prev) =>
-          prev.map((inv) => (inv.id === selectedInvoice.id ? { ...newInvoice, id: inv.id, updated_at: new Date().toISOString() } as InvoiceResponse : inv))
-        )
+        const updatedInvoice = await updateInvoice(selectedInvoice.id, newInvoice)
         toast({
           title: "Invoice Updated",
           description: `Invoice ${newInvoice.invoice_number} has been updated successfully.`,
         })
       }
 
-      setNewInvoice({ // Reset form
-        invoice_number: "", customer_id: "", amount: 0, tax_amount: 0, currency: "USD",
-        issue_date: new Date().toISOString().split("T")[0], due_date: new Date().toISOString().split("T")[0],
-        tenant_id: "", metadata: {},
+      setNewInvoice({
+        invoice_number: "",
+        customer_id: "",
+        amount: 0,
+        tax_amount: 0,
+        currency: "USD",
+        issue_date: new Date().toISOString().split("T")[0],
+        due_date: new Date().toISOString().split("T")[0],
+        tenant_id: "",
+        metadata: {},
       })
       setInvoiceView("list")
-      setSelectedInvoice(null);
+      setSelectedInvoice(null)
     } catch (error: any) {
-      toast({ title: "Error", description: error.message || "An unexpected error occurred.", variant: "destructive" })
+      toast({
+        title: "Error",
+        description: error.message || "An unexpected error occurred.",
+        variant: "destructive",
+      })
     }
   }
 
-  const handleSubmitPayment = () => {
-    // Basic validation
+  const handleSubmitPayment = async () => {
     if (
-      !newPayment.tenantId ||
-      !newPayment.customerId ||
-      !newPayment.paymentNumber ||
+      !newPayment.tenant_id ||
+      !newPayment.customer_id ||
+      !newPayment.payment_number ||
       newPayment.amount <= 0 ||
       !newPayment.currency ||
-      !newPayment.paymentDate ||
-      !newPayment.paymentMethod
+      !newPayment.payment_date ||
+      !newPayment.payment_method
     ) {
       toast({
         title: "Error",
@@ -683,29 +599,35 @@ export default function AccountsReceivablePage() {
       return
     }
 
-    // Simulate API call
-    console.log("Submitting new payment:", newPayment)
-    toast({
-      title: "Payment Submitted",
-      description: `Payment ${newPayment.paymentNumber} for $${newPayment.amount} has been submitted.`,
-    })
+    try {
+      const createdPayment = await createPayment(newPayment)
+      toast({
+        title: "Payment Submitted",
+        description: `Payment ${newPayment.payment_number} for ${formatCurrency(newPayment.amount)} has been submitted.`,
+      })
 
-    // Reset form and close modal
-    setNewPayment({
-      tenantId: "",
-      customerId: "",
-      paymentNumber: "",
-      amount: 0,
-      currency: "USD",
-      paymentDate: new Date().toISOString().split("T")[0],
-      paymentMethod: "WIRE",
-      referenceNumber: "",
-      description: "",
-    })
-    setIsSubmitPaymentModalOpen(false)
+      setNewPayment({
+        tenant_id: "",
+        customer_id: "",
+        payment_number: "",
+        amount: 0,
+        currency: "USD",
+        payment_date: new Date().toISOString().split("T")[0],
+        payment_method: "WIRE",
+        reference_number: "",
+        description: "",
+      })
+      setIsSubmitPaymentModalOpen(false)
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to submit payment.",
+        variant: "destructive",
+      })
+    }
   }
 
-  const handleItemSelect = (item: ARPayment | ARRemittance) => {
+  const handleItemSelect = (item: Payment) => {
     setSelectedItem(item)
     setShowDetailPanel(true)
   }
@@ -715,7 +637,6 @@ export default function AccountsReceivablePage() {
     setSelectedItem(null)
   }
 
-  // Edit Invoice handler
   const handleEditInvoice = () => {
     if (selectedInvoice) {
       setNewInvoice(selectedInvoice)
@@ -723,94 +644,54 @@ export default function AccountsReceivablePage() {
     }
   }
 
-  // Delete Invoice handler
-  const handleDeleteInvoice = (id: string) => {
+  const handleDeleteInvoice = async (id: string) => {
     if (window.confirm("Are you sure you want to delete this invoice?")) {
-      setInvoices((prev) => prev.filter((inv) => inv.id !== id))
-      setInvoiceView("list")
-      setSelectedInvoice(null)
-      toast({
-        title: "Invoice Deleted",
-        description: "The invoice has been deleted.",
-      })
-      // In a real app, call DELETE /api/v1/invoices/{invoice_id}
+      try {
+        await deleteInvoice(id)
+        setInvoiceView("list")
+        setSelectedInvoice(null)
+        toast({
+          title: "Invoice Deleted",
+          description: "The invoice has been deleted.",
+        })
+      } catch (error) {
+        toast({
+          title: "Error",
+          description: "Failed to delete invoice.",
+          variant: "destructive",
+        })
+      }
     }
   }
 
   // Status badge component
   const StatusBadge = ({ status }: { status: string }) => {
     switch (status) {
-      case "auto-applied":
+      case "RECONCILED":
         return (
           <Badge variant="outline" className="bg-green-100 text-green-800">
             <CheckCircle className="mr-1 h-3 w-3" />
-            Auto-Applied
+            Reconciled
           </Badge>
         )
-      case "unmatched":
+      case "RECEIVED":
+        return (
+          <Badge variant="outline" className="bg-blue-100 text-blue-800">
+            <Clock className="mr-1 h-3 w-3" />
+            Received
+          </Badge>
+        )
+      case "FAILED":
         return (
           <Badge variant="outline" className="bg-red-100 text-red-800">
             <XCircle className="mr-1 h-3 w-3" />
-            Unmatched
-          </Badge>
-        )
-      case "pending-review":
-        return (
-          <Badge variant="outline" className="bg-amber-100 text-amber-800">
-            <Clock className="mr-1 h-3 w-3" />
-            Pending Review
-          </Badge>
-        )
-      case "matched":
-        return (
-          <Badge variant="outline" className="bg-green-100 text-green-800">
-            <Check className="mr-1 h-3 w-3" />
-            Matched
-          </Badge>
-        )
-      case "pending":
-        return (
-          <Badge variant="outline" className="bg-amber-100 text-amber-800">
-            <Clock className="mr-1 h-3 w-3" />
-            Pending
+            Failed
           </Badge>
         )
       default:
         return (
           <Badge variant="outline" className="bg-gray-100 text-gray-800">
             {status}
-          </Badge>
-        )
-    }
-  }
-
-  const FileTypeBadge = ({ fileType }: { fileType: string }) => {
-    switch (fileType) {
-      case "email":
-        return (
-          <Badge variant="outline" className="bg-blue-100 text-blue-800">
-            <Mail className="mr-1 h-3 w-3" />
-            Email
-          </Badge>
-        )
-      case "bank-feed":
-        return (
-          <Badge variant="outline" className="bg-purple-100 text-purple-800">
-            <CreditCard className="mr-1 h-3 w-3" />
-            Bank Feed
-          </Badge>
-        )
-      case "manual":
-        return (
-          <Badge variant="outline" className="bg-gray-100 text-gray-800">
-            <FileText className="mr-1 h-3 w-3" />
-            Manual
-          </Badge>
-        )
-      default:
-        return (
-          <Badge variant="outline" className="bg-gray-100 text-gray-800">
-            {fileType}
           </Badge>
         )
     }
@@ -829,7 +710,7 @@ export default function AccountsReceivablePage() {
             <Button onClick={handleUpload} className="bg-teal-600 hover:bg-teal-700" disabled={isUploading}>
               {isUploading ? (
                 <>
-                  <Clock className="mr-2 h-4 w-4 animate-spin" /> Uploading...
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Uploading...
                 </>
               ) : (
                 <>
@@ -852,35 +733,35 @@ export default function AccountsReceivablePage() {
                 </DialogHeader>
                 <div className="grid gap-4 py-4">
                   <div className="grid grid-cols-4 items-center gap-4">
-                    <Label htmlFor="tenantId" className="text-right">
+                    <Label htmlFor="tenant_id" className="text-right">
                       Tenant ID
                     </Label>
                     <Input
-                      id="tenantId"
-                      value={newPayment.tenantId}
-                      onChange={(e) => setNewPayment({ ...newPayment, tenantId: e.target.value })}
+                      id="tenant_id"
+                      value={newPayment.tenant_id}
+                      onChange={(e) => setNewPayment({ ...newPayment, tenant_id: e.target.value })}
                       className="col-span-3"
                     />
                   </div>
                   <div className="grid grid-cols-4 items-center gap-4">
-                    <Label htmlFor="customerId" className="text-right">
+                    <Label htmlFor="customer_id" className="text-right">
                       Customer ID
                     </Label>
                     <Input
-                      id="customerId"
-                      value={newPayment.customerId}
-                      onChange={(e) => setNewPayment({ ...newPayment, customerId: e.target.value })}
+                      id="customer_id"
+                      value={newPayment.customer_id}
+                      onChange={(e) => setNewPayment({ ...newPayment, customer_id: e.target.value })}
                       className="col-span-3"
                     />
                   </div>
                   <div className="grid grid-cols-4 items-center gap-4">
-                    <Label htmlFor="paymentNumber" className="text-right">
+                    <Label htmlFor="payment_number" className="text-right">
                       Payment Number
                     </Label>
                     <Input
-                      id="paymentNumber"
-                      value={newPayment.paymentNumber}
-                      onChange={(e) => setNewPayment({ ...newPayment, paymentNumber: e.target.value })}
+                      id="payment_number"
+                      value={newPayment.payment_number}
+                      onChange={(e) => setNewPayment({ ...newPayment, payment_number: e.target.value })}
                       className="col-span-3"
                     />
                   </div>
@@ -915,24 +796,24 @@ export default function AccountsReceivablePage() {
                     </Select>
                   </div>
                   <div className="grid grid-cols-4 items-center gap-4">
-                    <Label htmlFor="paymentDate" className="text-right">
+                    <Label htmlFor="payment_date" className="text-right">
                       Payment Date
                     </Label>
                     <Input
-                      id="paymentDate"
+                      id="payment_date"
                       type="date"
-                      value={newPayment.paymentDate}
-                      onChange={(e) => setNewPayment({ ...newPayment, paymentDate: e.target.value })}
+                      value={newPayment.payment_date}
+                      onChange={(e) => setNewPayment({ ...newPayment, payment_date: e.target.value })}
                       className="col-span-3"
                     />
                   </div>
                   <div className="grid grid-cols-4 items-center gap-4">
-                    <Label htmlFor="paymentMethod" className="text-right">
+                    <Label htmlFor="payment_method" className="text-right">
                       Payment Method
                     </Label>
                     <Select
-                      value={newPayment.paymentMethod}
-                      onValueChange={(value) => setNewPayment({ ...newPayment, paymentMethod: value })}
+                      value={newPayment.payment_method}
+                      onValueChange={(value) => setNewPayment({ ...newPayment, payment_method: value })}
                     >
                       <SelectTrigger className="col-span-3">
                         <SelectValue placeholder="Select method" />
@@ -946,13 +827,13 @@ export default function AccountsReceivablePage() {
                     </Select>
                   </div>
                   <div className="grid grid-cols-4 items-center gap-4">
-                    <Label htmlFor="referenceNumber" className="text-right">
+                    <Label htmlFor="reference_number" className="text-right">
                       Reference Number
                     </Label>
                     <Input
-                      id="referenceNumber"
-                      value={newPayment.referenceNumber}
-                      onChange={(e) => setNewPayment({ ...newPayment, referenceNumber: e.target.value })}
+                      id="reference_number"
+                      value={newPayment.reference_number}
+                      onChange={(e) => setNewPayment({ ...newPayment, reference_number: e.target.value })}
                       className="col-span-3"
                     />
                   </div>
@@ -995,19 +876,8 @@ export default function AccountsReceivablePage() {
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-gray-500">Pending Review</p>
-                  <p className="text-2xl font-bold">{stats.pendingPayments}</p>
-                </div>
-                <Clock className="h-8 w-8 text-amber-500" />
-              </div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
                   <p className="text-sm text-gray-500">Total Amount</p>
-                  <p className="text-2xl font-bold">${stats.totalAmount.toLocaleString()}</p>
+                  <p className="text-2xl font-bold">{formatCurrency(stats.totalAmount)}</p>
                 </div>
                 <Receipt className="h-8 w-8 text-green-500" />
               </div>
@@ -1017,7 +887,18 @@ export default function AccountsReceivablePage() {
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-gray-500">Auto-Apply Rate</p>
+                  <p className="text-sm text-gray-500">Auto-Applied</p>
+                  <p className="text-2xl font-bold">{stats.autoAppliedPayments}</p>
+                </div>
+                <CheckCircle className="h-8 w-8 text-teal-500" />
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-gray-500">Reconciliation Rate</p>
                   <p className="text-2xl font-bold">{stats.autoApplyRate}%</p>
                 </div>
                 <CheckCircle className="h-8 w-8 text-teal-500" />
@@ -1053,6 +934,22 @@ export default function AccountsReceivablePage() {
                       Invoices
                       <Badge className="ml-2 bg-yellow-500">{invoices.length}</Badge>
                     </TabsTrigger>
+                    <TabsTrigger value="aging">
+                      Aging Reports
+                      <Badge className="ml-2 bg-purple-500">AR</Badge>
+                    </TabsTrigger>
+                    <TabsTrigger value="collections">
+                      Collections
+                      <Badge className="ml-2 bg-red-500">{collectionCases.length}</Badge>
+                    </TabsTrigger>
+                    <TabsTrigger value="credit">
+                      Credit Management
+                      <Badge className="ml-2 bg-indigo-500">{creditLimits.length}</Badge>
+                    </TabsTrigger>
+                    <TabsTrigger value="sales-orders">
+                      Sales Orders
+                      <Badge className="ml-2 bg-green-500">{salesOrders.length}</Badge>
+                    </TabsTrigger>
                   </TabsList>
 
                   <TabsContent value="payments" className="space-y-4">
@@ -1076,9 +973,11 @@ export default function AccountsReceivablePage() {
                           </SelectTrigger>
                           <SelectContent>
                             <SelectItem value="all">All customers</SelectItem>
-                            <SelectItem value="ACME Corp">ACME Corp</SelectItem>
-                            <SelectItem value="TechStart Inc">TechStart Inc</SelectItem>
-                            <SelectItem value="Global Solutions">Global Solutions</SelectItem>
+                            {customers.map((cust) => (
+                              <SelectItem key={cust.id} value={cust.id}>
+                                {cust.name}
+                              </SelectItem>
+                            ))}
                           </SelectContent>
                         </Select>
                         <Select value={paymentStatus} onValueChange={setPaymentStatus}>
@@ -1087,9 +986,9 @@ export default function AccountsReceivablePage() {
                           </SelectTrigger>
                           <SelectContent>
                             <SelectItem value="all">All status</SelectItem>
-                            <SelectItem value="auto-applied">Auto-Applied</SelectItem>
-                            <SelectItem value="unmatched">Unmatched</SelectItem>
-                            <SelectItem value="pending-review">Pending Review</SelectItem>
+                            <SelectItem value="RECEIVED">Received</SelectItem>
+                            <SelectItem value="RECONCILED">Reconciled</SelectItem>
+                            <SelectItem value="FAILED">Failed</SelectItem>
                           </SelectContent>
                         </Select>
                       </div>
@@ -1102,48 +1001,9 @@ export default function AccountsReceivablePage() {
                     </div>
 
                     {/* Payment List/Table */}
-                    {showDetailPanel ? (
-                      <div className="space-y-2">
-                        {filteredPayments.map((payment) => (
-                          <div
-                            key={payment.id}
-                            className={`p-4 border rounded-lg cursor-pointer hover:bg-gray-50 ${
-                              selectedItem?.id === payment.id ? "border-teal-500 bg-teal-50" : ""
-                            }`}
-                            onClick={() => handleItemSelect(payment)}
-                          >
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center space-x-4">
-                                <div>
-                                  <p className="font-medium">{payment.paymentId}</p>
-                                  <p className="text-sm text-gray-500">{payment.customer}</p>
-                                </div>
-                                <div>
-                                  <p className="text-sm">{new Date(payment.datePaid).toLocaleDateString()}</p>
-                                  <p className="font-medium">${payment.amount.toLocaleString()}</p>
-                                </div>
-                                <div>
-                                  <div className="flex items-center space-x-1">
-                                    {payment.matched === "full" ? (
-                                      <Check className="h-4 w-4 text-green-500" />
-                                    ) : payment.matched === "partial" ? (
-                                      <AlertTriangle className="h-4 w-4 text-amber-500" />
-                                    ) : (
-                                      <XCircle className="h-4 w-4 text-red-500" />
-                                    )}
-                                    <span className="text-sm text-gray-500 capitalize">{payment.matched}</span>
-                                  </div>
-                                </div>
-                              </div>
-                              <div className="flex items-center space-x-2">
-                                <StatusBadge status={payment.status} />
-                                <Badge variant="outline" className="bg-blue-50 text-blue-700">
-                                  {payment.confidence}%
-                                </Badge>
-                              </div>
-                            </div>
-                          </div>
-                        ))}
+                    {paymentsLoading ? (
+                      <div className="flex justify-center p-8">
+                        <Loader2 className="h-8 w-8 animate-spin" />
                       </div>
                     ) : (
                       <Table>
@@ -1153,9 +1013,7 @@ export default function AccountsReceivablePage() {
                             <TableHead>Customer</TableHead>
                             <TableHead>Date Paid</TableHead>
                             <TableHead>Amount</TableHead>
-                            <TableHead>Matched</TableHead>
                             <TableHead>Status</TableHead>
-                            <TableHead>Confidence</TableHead>
                             <TableHead>Actions</TableHead>
                           </TableRow>
                         </TableHeader>
@@ -1166,29 +1024,12 @@ export default function AccountsReceivablePage() {
                               className="cursor-pointer hover:bg-gray-50"
                               onClick={() => handleItemSelect(payment)}
                             >
-                              <TableCell className="font-medium">{payment.paymentId}</TableCell>
-                              <TableCell>{payment.customer}</TableCell>
-                              <TableCell>{new Date(payment.datePaid).toLocaleDateString()}</TableCell>
-                              <TableCell>${payment.amount.toLocaleString()}</TableCell>
-                              <TableCell>
-                                <div className="flex items-center space-x-1">
-                                  {payment.matched === "full" ? (
-                                    <Check className="h-4 w-4 text-green-500" />
-                                  ) : payment.matched === "partial" ? (
-                                    <AlertTriangle className="h-4 w-4 text-amber-500" />
-                                  ) : (
-                                    <XCircle className="h-4 w-4 text-red-500" />
-                                  )}
-                                  <span className="text-sm capitalize">{payment.matched}</span>
-                                </div>
-                              </TableCell>
+                              <TableCell className="font-medium">{payment.payment_number}</TableCell>
+                              <TableCell>{customers.find(c => c.id === payment.customer_id)?.name || payment.customer_id}</TableCell>
+                              <TableCell>{formatDate(payment.payment_date)}</TableCell>
+                              <TableCell>{formatCurrency(payment.amount, payment.currency)}</TableCell>
                               <TableCell>
                                 <StatusBadge status={payment.status} />
-                              </TableCell>
-                              <TableCell>
-                                <Badge variant="outline" className="bg-blue-50 text-blue-700">
-                                  {payment.confidence}%
-                                </Badge>
                               </TableCell>
                               <TableCell>
                                 <Button
@@ -1200,183 +1041,6 @@ export default function AccountsReceivablePage() {
                                   }}
                                 >
                                   <Eye className="h-4 w-4" />
-                                </Button>
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    )}
-                  </TabsContent>
-
-                  <TabsContent value="remittances" className="space-y-4">
-                    {/* Remittance Filters */}
-                    <div className="flex flex-col sm:flex-row gap-2">
-                      <Select value={remittanceDateRange} onValueChange={setRemittanceDateRange}>
-                        <SelectTrigger className="w-[140px]">
-                          <SelectValue placeholder="Date range" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="all">All dates</SelectItem>
-                          <SelectItem value="today">Today</SelectItem>
-                          <SelectItem value="week">This week</SelectItem>
-                          <SelectItem value="month">This month</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <Select value={remittanceCustomer} onValueChange={setRemittanceCustomer}>
-                        <SelectTrigger className="w-[140px]">
-                          <SelectValue placeholder="Customer" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="all">All customers</SelectItem>
-                          <SelectItem value="ACME Corp">ACME Corp</SelectItem>
-                          <SelectItem value="TechStart Inc">TechStart Inc</SelectItem>
-                          <SelectItem value="Global Solutions">Global Solutions</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <Select value={remittanceFileType} onValueChange={setRemittanceFileType}>
-                        <SelectTrigger className="w-[140px]">
-                          <SelectValue placeholder="File Type" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="all">All types</SelectItem>
-                          <SelectItem value="email">Email</SelectItem>
-                          <SelectItem value="bank-feed">Bank Feed</SelectItem>
-                          <SelectItem value="manual">Manual</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    {/* Remittance List/Table */}
-                    {showDetailPanel ? (
-                      <div className="space-y-2">
-                        {filteredRemittances.map((remittance) => (
-                          <div
-                            key={remittance.id}
-                            className={`p-4 border rounded-lg cursor-pointer hover:bg-gray-50 ${
-                              selectedItem?.id === remittance.id ? "border-teal-500 bg-teal-50" : ""
-                            }`}
-                            onClick={() => handleItemSelect(remittance)}
-                          >
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center space-x-4">
-                                <div>
-                                  <p className="font-medium">{remittance.remitId}</p>
-                                  <p className="text-sm text-gray-500">{remittance.customer}</p>
-                                </div>
-                                <div>
-                                  <p className="text-sm">{new Date(remittance.dateReceived).toLocaleDateString()}</p>
-                                  <p className="font-medium">${remittance.amount.toLocaleString()}</p>
-                                </div>
-                                <div>
-                                  <div className="flex items-center space-x-1">
-                                    {remittance.matched ? (
-                                      <Check className="h-4 w-4 text-green-500" />
-                                    ) : (
-                                      <XCircle className="h-4 w-4 text-red-500" />
-                                    )}
-                                    <span className="text-sm text-gray-500">{remittance.matched ? "Yes" : "No"}</span>
-                                  </div>
-                                </div>
-                              </div>
-                              <div className="flex items-center space-x-2">
-                                <StatusBadge status={remittance.status} />
-                                <FileTypeBadge fileType={remittance.fileType} />
-                                <Badge variant="outline" className="bg-blue-50 text-blue-700">
-                                  {remittance.confidence}%
-                                </Badge>
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead>Remit ID</TableHead>
-                            <TableHead>Customer</TableHead>
-                            <TableHead>Date Received</TableHead>
-                            <TableHead>Amount</TableHead>
-                            <TableHead>Matched</TableHead>
-                            <TableHead>Status</TableHead>
-                            <TableHead>File Type</TableHead>
-                            <TableHead>Confidence</TableHead>
-                            <TableHead>Actions</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {filteredRemittances.map((remittance) => (
-                            <TableRow
-                              key={remittance.id}
-                              className="cursor-pointer hover:bg-gray-50"
-                              onClick={() => handleItemSelect(remittance)}
-                            >
-                              <TableCell className="font-medium">{remittance.remitId}</TableCell>
-                              <TableCell>{remittance.customer}</TableCell>
-                              <TableCell>{new Date(remittance.dateReceived).toLocaleDateString()}</TableCell>
-                              <TableCell>${remittance.amount.toLocaleString()}</TableCell>
-                              <TableCell>
-                                <div className="flex items-center space-x-1">
-                                  {remittance.matched ? (
-                                    <Check className="h-4 w-4 text-green-500" />
-                                  ) : (
-                                    <XCircle className="h-4 w-4 text-red-500" />
-                                  )}
-                                  <span className="text-sm">{remittance.matched ? "Yes" : "No"}</span>
-                                </div>
-                              </TableCell>
-                              <TableCell>
-                                <StatusBadge status={remittance.status} />
-                              </TableCell>
-                              <TableCell>
-                                <FileTypeBadge fileType={remittance.fileType} />
-                              </TableCell>
-                              <TableCell>
-                                <Badge variant="outline" className="bg-blue-50 text-blue-700">
-                                  {remittance.confidence}%
-                                </Badge>
-                              </TableCell>
-                              <TableCell>
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    handleItemSelect(remittance)
-                                  }}
-                                >
-                                  <Eye className="h-4 w-4" />
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    // Placeholder for Review & Reconcile action
-                                    toast({
-                                      title: "Review & Reconcile",
-                                      description: `Opening review for remittance ${remittance.id}`,
-                                    })
-                                  }}
-                                >
-                                  <Check className="h-4 w-4" />
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    // Placeholder for Reject Remittance action
-                                    if (selectedItem) {
-                                      toast({
-                                        title: "Reject Remittance",
-                                        description: `Marking remittance ${selectedItem.id} for dispute`,
-                                      })
-                                    }
-                                  }}
-                                >
-                                  <X className="h-4 w-4" />
                                 </Button>
                               </TableCell>
                             </TableRow>
@@ -1401,51 +1065,57 @@ export default function AccountsReceivablePage() {
                             Add New Customer
                           </Button>
                         </div>
-                        <Table>
-                          <TableHeader>
-                            <TableRow>
-                              <TableHead>Customer Number</TableHead>
-                              <TableHead>Name</TableHead>
-                              <TableHead>Contact Email</TableHead>
-                              <TableHead>Status</TableHead>
-                              <TableHead className="text-right">Actions</TableHead>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {filteredCustomers.length === 0 ? (
+                        {customersLoading ? (
+                          <div className="flex justify-center p-8">
+                            <Loader2 className="h-8 w-8 animate-spin" />
+                          </div>
+                        ) : (
+                          <Table>
+                            <TableHeader>
                               <TableRow>
-                                <TableCell colSpan={5} className="text-center text-muted-foreground">
-                                  No customers found.
-                                </TableCell>
+                                <TableHead>Customer Number</TableHead>
+                                <TableHead>Name</TableHead>
+                                <TableHead>Contact Email</TableHead>
+                                <TableHead>Status</TableHead>
+                                <TableHead className="text-right">Actions</TableHead>
                               </TableRow>
-                            ) : (
-                              filteredCustomers.map((customer) => (
-                                <TableRow key={customer.id}>
-                                  <TableCell className="font-medium">{customer.customer_number}</TableCell>
-                                  <TableCell>{customer.name}</TableCell>
-                                  <TableCell>{customer.contact_email}</TableCell>
-                                  <TableCell>
-                                    <Badge variant={customer.is_active ? "default" : "destructive"}>
-                                      {customer.is_active ? "Active" : "Inactive"}
-                                    </Badge>
-                                  </TableCell>
-                                  <TableCell className="text-right">
-                                    <Button
-                                      size="sm"
-                                      variant="ghost"
-                                      onClick={() => {
-                                        setSelectedCustomer(customer)
-                                        setCustomerView("details")
-                                      }}
-                                    >
-                                      <Eye className="h-4 w-4" />
-                                    </Button>
+                            </TableHeader>
+                            <TableBody>
+                              {filteredCustomers.length === 0 ? (
+                                <TableRow>
+                                  <TableCell colSpan={5} className="text-center text-muted-foreground">
+                                    No customers found.
                                   </TableCell>
                                 </TableRow>
-                              ))
-                            )}
-                          </TableBody>
-                        </Table>
+                              ) : (
+                                filteredCustomers.map((customer) => (
+                                  <TableRow key={customer.id}>
+                                    <TableCell className="font-medium">{customer.customer_number}</TableCell>
+                                    <TableCell>{customer.name}</TableCell>
+                                    <TableCell>{customer.contact_email}</TableCell>
+                                    <TableCell>
+                                      <Badge variant={customer.is_active ? "default" : "destructive"}>
+                                        {customer.is_active ? "Active" : "Inactive"}
+                                      </Badge>
+                                    </TableCell>
+                                    <TableCell className="text-right">
+                                      <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        onClick={() => {
+                                          setSelectedCustomer(customer)
+                                          setCustomerView("details")
+                                        }}
+                                      >
+                                        <Eye className="h-4 w-4" />
+                                      </Button>
+                                    </TableCell>
+                                  </TableRow>
+                                ))
+                              )}
+                            </TableBody>
+                          </Table>
+                        )}
                       </div>
                     )}
 
@@ -1510,21 +1180,13 @@ export default function AccountsReceivablePage() {
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                           <div className="space-y-2">
                             <Label htmlFor="payment_terms">Payment Terms (days)</Label>
-                            <Select
-                              value={newCustomer.payment_terms?.toString()}
-                              onValueChange={(value) => setNewCustomer({ ...newCustomer, payment_terms: parseInt(value) })}
-                            >
-                              <SelectTrigger>
-                                <SelectValue placeholder="Select payment terms" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="15">15 Days</SelectItem>
-                                <SelectItem value="30">30 Days</SelectItem>
-                                <SelectItem value="45">45 Days</SelectItem>
-                                <SelectItem value="60">60 Days</SelectItem>
-                                <SelectItem value="90">90 Days</SelectItem>
-                              </SelectContent>
-                            </Select>
+                            <Input
+                              id="payment_terms"
+                              type="number"
+                              value={newCustomer.payment_terms}
+                              onChange={(e) => setNewCustomer({ ...newCustomer, payment_terms: parseInt(e.target.value) })}
+                              placeholder="e.g., 30"
+                            />
                           </div>
                           <div className="space-y-2">
                             <Label htmlFor="credit_limit">Credit Limit</Label>
@@ -1622,7 +1284,7 @@ export default function AccountsReceivablePage() {
                           </div>
                           <div>
                             <Label>Credit Limit</Label>
-                            <p>{selectedCustomer.credit_limit ? `$${selectedCustomer.credit_limit.toLocaleString()}` : "N/A"}</p>
+                            <p>{selectedCustomer.credit_limit ? formatCurrency(selectedCustomer.credit_limit) : "N/A"}</p>
                           </div>
                         </div>
 
@@ -1636,11 +1298,11 @@ export default function AccountsReceivablePage() {
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                           <div>
                             <Label>Created At</Label>
-                            <p>{new Date(selectedCustomer.created_at).toLocaleString()}</p>
+                            <p>{formatDate(selectedCustomer.created_at)}</p>
                           </div>
                           <div>
                             <Label>Updated At</Label>
-                            <p>{new Date(selectedCustomer.updated_at).toLocaleString()}</p>
+                            <p>{formatDate(selectedCustomer.updated_at)}</p>
                           </div>
                         </div>
                       </div>
@@ -1689,65 +1351,71 @@ export default function AccountsReceivablePage() {
                           </Button>
                         </div>
 
-                        <Table>
-                          <TableHeader>
-                            <TableRow>
-                              <TableHead>Invoice Number</TableHead>
-                              <TableHead>Customer</TableHead>
-                              <TableHead>Amount</TableHead>
-                              <TableHead>Due Date</TableHead>
-                              <TableHead>Status</TableHead>
-                              <TableHead className="text-right">Actions</TableHead>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {invoices.filter(inv =>
+                        {invoicesLoading ? (
+                          <div className="flex justify-center p-8">
+                            <Loader2 className="h-8 w-8 animate-spin" />
+                          </div>
+                        ) : (
+                          <Table>
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead>Invoice Number</TableHead>
+                                <TableHead>Customer</TableHead>
+                                <TableHead>Amount</TableHead>
+                                <TableHead>Due Date</TableHead>
+                                <TableHead>Status</TableHead>
+                                <TableHead className="text-right">Actions</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {invoices.filter(inv =>
                                 (invoiceSearchTerm === "" || inv.invoice_number.toLowerCase().includes(invoiceSearchTerm.toLowerCase())) &&
                                 (invoiceFilterCustomer === "all" || inv.customer_id === invoiceFilterCustomer) &&
                                 (invoiceFilterStatus === "all" || inv.status === invoiceFilterStatus)
                               ).length === 0 ? (
-                              <TableRow>
-                                <TableCell colSpan={6} className="text-center text-muted-foreground">
-                                  No invoices found.
-                                </TableCell>
-                              </TableRow>
-                            ) : (
-                              invoices.filter(inv =>
-                                (invoiceSearchTerm === "" || inv.invoice_number.toLowerCase().includes(invoiceSearchTerm.toLowerCase())) &&
-                                (invoiceFilterCustomer === "all" || inv.customer_id === invoiceFilterCustomer) &&
-                                (invoiceFilterStatus === "all" || inv.status === invoiceFilterStatus)
-                              ).map((invoice) => (
-                                <TableRow key={invoice.id}>
-                                  <TableCell className="font-medium">{invoice.invoice_number}</TableCell>
-                                  <TableCell>{customers.find(c => c.id === invoice.customer_id)?.name || invoice.customer_id}</TableCell>
-                                  <TableCell>${invoice.amount.toLocaleString()}</TableCell>
-                                  <TableCell>{new Date(invoice.due_date).toLocaleDateString()}</TableCell>
-                                  <TableCell>
-                                    <Badge variant="outline" className={
-                                      invoice.status === "OPEN" ? "bg-blue-100 text-blue-800" :
-                                      invoice.status === "PAID" ? "bg-green-100 text-green-800" :
-                                      invoice.status === "OVERDUE" ? "bg-red-100 text-red-800" : "bg-gray-100 text-gray-800"
-                                    }>
-                                      {invoice.status}
-                                    </Badge>
-                                  </TableCell>
-                                  <TableCell className="text-right">
-                                    <Button
-                                      size="sm"
-                                      variant="ghost"
-                                      onClick={() => {
-                                        setSelectedInvoice(invoice)
-                                        setInvoiceView("details")
-                                      }}
-                                    >
-                                      <Eye className="h-4 w-4" />
-                                    </Button>
+                                <TableRow>
+                                  <TableCell colSpan={6} className="text-center text-muted-foreground">
+                                    No invoices found.
                                   </TableCell>
                                 </TableRow>
-                              ))
-                            )}
-                          </TableBody>
-                        </Table>
+                              ) : (
+                                invoices.filter(inv =>
+                                  (invoiceSearchTerm === "" || inv.invoice_number.toLowerCase().includes(invoiceSearchTerm.toLowerCase())) &&
+                                  (invoiceFilterCustomer === "all" || inv.customer_id === invoiceFilterCustomer) &&
+                                  (invoiceFilterStatus === "all" || inv.status === invoiceFilterStatus)
+                                ).map((invoice) => (
+                                  <TableRow key={invoice.id}>
+                                    <TableCell className="font-medium">{invoice.invoice_number}</TableCell>
+                                    <TableCell>{customers.find(c => c.id === invoice.customer_id)?.name || invoice.customer_id}</TableCell>
+                                    <TableCell>{formatCurrency(invoice.amount, invoice.currency)}</TableCell>
+                                    <TableCell>{formatDate(invoice.due_date)}</TableCell>
+                                    <TableCell>
+                                      <Badge variant="outline" className={
+                                        invoice.status === "OPEN" ? "bg-blue-100 text-blue-800" :
+                                        invoice.status === "PAID" ? "bg-green-100 text-green-800" :
+                                        invoice.status === "OVERDUE" ? "bg-red-100 text-red-800" : "bg-gray-100 text-gray-800"
+                                      }>
+                                        {invoice.status}
+                                      </Badge>
+                                    </TableCell>
+                                    <TableCell className="text-right">
+                                      <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        onClick={() => {
+                                          setSelectedInvoice(invoice)
+                                          setInvoiceView("details")
+                                        }}
+                                      >
+                                        <Eye className="h-4 w-4" />
+                                      </Button>
+                                    </TableCell>
+                                  </TableRow>
+                                ))
+                              )}
+                            </TableBody>
+                          </Table>
+                        )}
                       </div>
                     )}
 
@@ -1869,16 +1537,6 @@ export default function AccountsReceivablePage() {
                           />
                         </div>
 
-                        <div className="space-y-2">
-                          <Label htmlFor="document_path">Document Path (URL)</Label>
-                          <Input
-                            id="document_path"
-                            value={newInvoice.document_path}
-                            onChange={(e) => setNewInvoice({ ...newInvoice, document_path: e.target.value })}
-                            placeholder="e.g., https://example.com/invoice-001.pdf"
-                          />
-                        </div>
-
                         <div className="flex space-x-2">
                           <Button onClick={handleSaveInvoice} className="bg-teal-600 hover:bg-teal-700">
                             {invoiceView === "create" ? "Submit Invoice" : "Save Changes"}
@@ -1926,22 +1584,22 @@ export default function AccountsReceivablePage() {
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                           <div className="space-y-2">
                             <Label>Amount</Label>
-                            <p>${selectedInvoice.amount.toLocaleString()} {selectedInvoice.currency}</p>
+                            <p>{formatCurrency(selectedInvoice.amount, selectedInvoice.currency)}</p>
                           </div>
                           <div className="space-y-2">
                             <Label>Tax Amount</Label>
-                            <p>${selectedInvoice.tax_amount.toLocaleString()} {selectedInvoice.currency}</p>
+                            <p>{formatCurrency(selectedInvoice.tax_amount, selectedInvoice.currency)}</p>
                           </div>
                         </div>
 
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                           <div className="space-y-2">
                             <Label>Issue Date</Label>
-                            <p>{new Date(selectedInvoice.issue_date).toLocaleDateString()}</p>
+                            <p>{formatDate(selectedInvoice.issue_date)}</p>
                           </div>
                           <div className="space-y-2">
                             <Label>Due Date</Label>
-                            <p>{new Date(selectedInvoice.due_date).toLocaleDateString()}</p>
+                            <p>{formatDate(selectedInvoice.due_date)}</p>
                           </div>
                         </div>
 
@@ -1961,42 +1619,7 @@ export default function AccountsReceivablePage() {
                           <p>{selectedInvoice.description || "N/A"}</p>
                         </div>
 
-                        <div className="space-y-2">
-                          <Label>Document</Label>
-                          {selectedInvoice.document_path ? (
-                            <a href={selectedInvoice.document_path} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
-                              View Document
-                            </a>
-                          ) : (
-                            <p>N/A</p>
-                          )}
-                        </div>
-
-                        <Separator />
-
-                        <h4 className="font-medium mb-2">Related Payments</h4>
-                        {/* Placeholder for related payments table */}
-                        <Table>
-                          <TableHeader>
-                            <TableRow>
-                              <TableHead>Payment ID</TableHead>
-                              <TableHead>Amount</TableHead>
-                              <TableHead>Allocation Date</TableHead>
-                              <TableHead>Auto-Matched</TableHead>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            <TableRow>
-                              <TableCell>PMT-891</TableCell>
-                              <TableCell>$5,500</TableCell>
-                              <TableCell>2025-07-10</TableCell>
-                              <TableCell>Yes</TableCell>
-                            </TableRow>
-                          </TableBody>
-                        </Table>
-
                         <div className="flex space-x-2">
-                          {/* Edit and Delete Invoice buttons (if backend endpoints available) */}
                           <Button
                             className="bg-teal-600 hover:bg-teal-700"
                             onClick={handleEditInvoice}
@@ -2013,23 +1636,497 @@ export default function AccountsReceivablePage() {
                       </div>
                     )}
                   </TabsContent>
+
+                  <TabsContent value="credit" className="space-y-4">
+                    <div className="flex justify-between items-center">
+                      <h3 className="text-lg font-medium">Credit Management Overview</h3>
+                      <div className="flex gap-2">
+                        <Button
+                          variant={creditView === "limits" ? "default" : "outline"}
+                          onClick={() => setCreditView("limits")}
+                        >
+                          Credit Limits
+                        </Button>
+                        <Button
+                          variant={creditView === "assessments" ? "default" : "outline"}
+                          onClick={() => setCreditView("assessments")}
+                        >
+                          Credit Assessments
+                        </Button>
+                      </div>
+                    </div>
+
+                    {creditLoading ? (
+                      <div className="flex justify-center p-8">
+                        <Loader2 className="h-8 w-8 animate-spin" />
+                      </div>
+                    ) : (
+                      <>
+                        {creditView === "limits" && (
+                          <Table>
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead>Customer</TableHead>
+                                <TableHead>Credit Limit</TableHead>
+                                <TableHead>Expiry Date</TableHead>
+                                <TableHead>Risk Rating</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {creditLimits.length === 0 ? (
+                                <TableRow>
+                                  <TableCell colSpan={4} className="text-center text-muted-foreground">
+                                    No credit limits found.
+                                  </TableCell>
+                                </TableRow>
+                              ) : (
+                                creditLimits.map((limit) => (
+                                  <TableRow key={limit.id}>
+                                    <TableCell>{customers.find(c => c.id === limit.customer_id)?.name || limit.customer_id}</TableCell>
+                                    <TableCell>{formatCurrency(limit.credit_limit)}</TableCell>
+                                    <TableCell>{limit.expiry_date ? formatDate(limit.expiry_date) : "N/A"}</TableCell>
+                                    <TableCell>{limit.risk_rating || "N/A"}</TableCell>
+                                  </TableRow>
+                                ))
+                              )}
+                            </TableBody>
+                          </Table>
+                        )}
+
+                        {creditView === "assessments" && (
+                          <Table>
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead>Customer</TableHead>
+                                <TableHead>Type</TableHead>
+                                <TableHead>Requested Amount</TableHead>
+                                <TableHead>Decision</TableHead>
+                                <TableHead>Approved Amount</TableHead>
+                                <TableHead>Risk Score</TableHead>
+                                <TableHead>Assessment Date</TableHead>
+                                <TableHead>Notes</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {creditAssessments.length === 0 ? (
+                                <TableRow>
+                                  <TableCell colSpan={8} className="text-center text-muted-foreground">
+                                    No credit assessments found.
+                                  </TableCell>
+                                </TableRow>
+                              ) : (
+                                creditAssessments.map((assessment) => (
+                                  <TableRow key={assessment.id}>
+                                    <TableCell>{customers.find(c => c.id === assessment.customer_id)?.name || assessment.customer_id}</TableCell>
+                                    <TableCell>{assessment.assessment_type}</TableCell>
+                                    <TableCell>{formatCurrency(assessment.requested_amount)}</TableCell>
+                                    <TableCell>
+                                      <Badge variant="outline" className={
+                                        assessment.decision === "APPROVED" ? "bg-green-100 text-green-800" :
+                                        assessment.decision === "REJECTED" ? "bg-red-100 text-red-800" : "bg-gray-100 text-gray-800"
+                                      }>
+                                        {assessment.decision}
+                                      </Badge>
+                                    </TableCell>
+                                    <TableCell>{formatCurrency(assessment.approved_amount)}</TableCell>
+                                    <TableCell>{assessment.risk_score?.toFixed(2) || "N/A"}</TableCell>
+                                    <TableCell>{formatDate(assessment.assessment_date)}</TableCell>
+                                    <TableCell>{assessment.notes || "N/A"}</TableCell>
+                                  </TableRow>
+                                ))
+                              )}
+                            </TableBody>
+                          </Table>
+                        )}
+                      </>
+                    )}
+                  </TabsContent>
+
+                  <TabsContent value="aging" className="space-y-4">
+                    <div className="flex justify-between items-center">
+                      <h3 className="text-lg font-medium">Aging Report</h3>
+                      <Button onClick={handleExport} className="bg-teal-600 hover:bg-teal-700">
+                        <Download className="mr-2 h-4 w-4" />
+                        Export Report
+                      </Button>
+                    </div>
+
+                    {agingLoading ? (
+                      <div className="flex justify-center p-8">
+                        <Loader2 className="h-8 w-8 animate-spin" />
+                      </div>
+                    ) : agingReport ? (
+                      <div className="space-y-4">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <Card>
+                            <CardHeader>
+                              <CardTitle>Total Outstanding</CardTitle>
+                            </CardHeader>
+                            <CardContent>
+                              <p className="text-2xl font-bold">{formatCurrency(agingReport.total_outstanding)}</p>
+                            </CardContent>
+                          </Card>
+                          <Card>
+                            <CardHeader>
+                              <CardTitle>Total Overdue</CardTitle>
+                            </CardHeader>
+                            <CardContent>
+                              <p className="text-2xl font-bold">{formatCurrency(agingReport.total_overdue)}</p>
+                            </CardContent>
+                          </Card>
+                        </div>
+
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>Aging Bucket</TableHead>
+                              <TableHead>Total Amount</TableHead>
+                              <TableHead>Invoice Count</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {agingReport.buckets.map((bucket) => (
+                              <TableRow key={bucket.bucket_name}>
+                                <TableCell className="font-medium">{bucket.bucket_name} Days</TableCell>
+                                <TableCell>{formatCurrency(bucket.total_amount)}</TableCell>
+                                <TableCell>{bucket.invoice_count}</TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+
+                        {agingReport.customer_breakdown && agingReport.customer_breakdown.length > 0 && (
+                          <div className="space-y-2">
+                            <h4 className="text-lg font-medium">Customer Breakdown</h4>
+                            <Table>
+                              <TableHeader>
+                                <TableRow>
+                                  <TableHead>Customer</TableHead>
+                                  <TableHead>Total Outstanding</TableHead>
+                                  <TableHead>Current</TableHead>
+                                  <TableHead>1-30 Days</TableHead>
+                                  <TableHead>31-60 Days</TableHead>
+                                  <TableHead>61-90 Days</TableHead>
+                                  <TableHead>90+ Days</TableHead>
+                                </TableRow>
+                              </TableHeader>
+                              <TableBody>
+                                {agingReport.customer_breakdown.map((customerAging) => (
+                                  <TableRow key={customerAging.customer_id}>
+                                    <TableCell>{customerAging.customer_name}</TableCell>
+                                    <TableCell>{formatCurrency(customerAging.total_outstanding)}</TableCell>
+                                    <TableCell>{formatCurrency(customerAging.current)}</TableCell>
+                                    <TableCell>{formatCurrency(customerAging.days_1_30)}</TableCell>
+                                    <TableCell>{formatCurrency(customerAging.days_31_60)}</TableCell>
+                                    <TableCell>{formatCurrency(customerAging.days_61_90)}</TableCell>
+                                    <TableCell>{formatCurrency(customerAging.days_90_plus)}</TableCell>
+                                  </TableRow>
+                                ))}
+                              </TableBody>
+                            </Table>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="text-center text-muted-foreground p-8">
+                        No aging report data available.
+                      </div>
+                    )}
+                  </TabsContent>
+
+                  <TabsContent value="sales-orders" className="space-y-4">
+                    {salesOrderView === "list" && (
+                      <div className="space-y-4">
+                        <div className="flex justify-between items-center">
+                          <h3 className="text-lg font-medium">Sales Orders Overview</h3>
+                          <Button onClick={() => setSalesOrderView("create")} className="bg-teal-600 hover:bg-teal-700">
+                            <PlusCircle className="mr-2 h-4 w-4" />
+                            Create New Sales Order
+                          </Button>
+                        </div>
+                        {salesOrdersLoading ? (
+                          <div className="flex justify-center p-8">
+                            <Loader2 className="h-8 w-8 animate-spin" />
+                          </div>
+                        ) : (
+                          <Table>
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead>Order Number</TableHead>
+                                <TableHead>Customer</TableHead>
+                                <TableHead>Order Date</TableHead>
+                                <TableHead>Total Amount</TableHead>
+                                <TableHead>Status</TableHead>
+                                <TableHead>Credit Status</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {salesOrders.length === 0 ? (
+                                <TableRow>
+                                  <TableCell colSpan={6} className="text-center text-muted-foreground">
+                                    No sales orders found.
+                                  </TableCell>
+                                </TableRow>
+                              ) : (
+                                salesOrders.map((order) => (
+                                  <TableRow key={order.id}>
+                                    <TableCell className="font-medium">{order.order_number}</TableCell>
+                                    <TableCell>{customers.find(c => c.id === order.customer_id)?.name || order.customer_id}</TableCell>
+                                    <TableCell>{formatDate(order.order_date)}</TableCell>
+                                    <TableCell>{formatCurrency(order.total_amount, order.currency)}</TableCell>
+                                    <TableCell>
+                                      <Badge variant="outline" className={
+                                        order.status === "PENDING" ? "bg-blue-100 text-blue-800" :
+                                        order.status === "APPROVED" ? "bg-green-100 text-green-800" :
+                                        order.status === "REJECTED" ? "bg-red-100 text-red-800" : "bg-gray-100 text-gray-800"
+                                      }>
+                                        {order.status}
+                                      </Badge>
+                                    </TableCell>
+                                    <TableCell>
+                                      <Badge variant="outline" className={
+                                        order.credit_status === "PENDING" ? "bg-blue-100 text-blue-800" :
+                                        order.credit_status === "APPROVED" ? "bg-green-100 text-green-800" :
+                                        order.credit_status === "REJECTED" ? "bg-red-100 text-red-800" : "bg-gray-100 text-gray-800"
+                                      }>
+                                        {order.credit_status}
+                                      </Badge>
+                                    </TableCell>
+                                  </TableRow>
+                                ))
+                              )}
+                            </TableBody>
+                          </Table>
+                        )}
+                      </div>
+                    )}
+
+                    {salesOrderView === "create" && (
+                      <div className="space-y-4">
+                        <h3 className="text-lg font-medium">Create New Sales Order</h3>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div className="space-y-2">
+                            <Label htmlFor="tenant_id_so">Tenant ID (Mandatory)</Label>
+                            <Input
+                              id="tenant_id_so"
+                              value={newSalesOrder.tenant_id}
+                              onChange={(e) => setNewSalesOrder({ ...newSalesOrder, tenant_id: e.target.value })}
+                              placeholder="e.g., org-abc-123"
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor="customer_id_so">Customer (Mandatory)</Label>
+                            <Select
+                              value={newSalesOrder.customer_id}
+                              onValueChange={(value) => setNewSalesOrder({ ...newSalesOrder, customer_id: value })}
+                            >
+                              <SelectTrigger>
+                                <SelectValue placeholder="Select Customer" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {customers.map((cust) => (
+                                  <SelectItem key={cust.id} value={cust.id}>
+                                    {cust.name}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div className="space-y-2">
+                            <Label htmlFor="order_date">Order Date</Label>
+                            <Input
+                              id="order_date"
+                              type="datetime-local"
+                              value={newSalesOrder.order_date ? newSalesOrder.order_date.substring(0, 16) : ''} // Added null check
+                              onChange={(e) => setNewSalesOrder({ ...newSalesOrder, order_date: e.target.value ? new Date(e.target.value).toISOString() : '' })}
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor="requested_delivery_date">Requested Delivery Date</Label>
+                            <Input
+                              id="requested_delivery_date"
+                              type="datetime-local" // Changed type to datetime-local
+                              value={newSalesOrder.requested_delivery_date ? new Date(newSalesOrder.requested_delivery_date).toISOString().substring(0, 16) : ''}
+                              onChange={(e) => setNewSalesOrder({ ...newSalesOrder, requested_delivery_date: e.target.value ? new Date(e.target.value).toISOString() : '' })}
+                            />
+                          </div>
+                        </div>
+
+                        <div className="space-y-2">
+                          <Label htmlFor="payment_terms_so">Payment Terms</Label>
+                          <Input
+                            id="payment_terms_so"
+                            value={newSalesOrder.payment_terms}
+                            onChange={(e) => setNewSalesOrder({ ...newSalesOrder, payment_terms: e.target.value })}
+                            placeholder="e.g., Net 30"
+                          />
+                        </div>
+
+                        <h4 className="text-md font-medium mt-4">Order Lines (Minimum 1)</h4>
+                        <div className="space-y-2 border p-4 rounded-md">
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div className="space-y-2">
+                              <Label htmlFor="line_description">Description</Label>
+                              <Input
+                                id="line_description"
+                                value={newSalesOrder.order_lines[0]?.description || ''}
+                                onChange={(e) => {
+                                  const updatedLines = [...newSalesOrder.order_lines];
+                                  if (!updatedLines[0]) updatedLines[0] = { line_number: 1, description: '', quantity: 0, unit_price: 0 };
+                                  updatedLines[0].description = e.target.value;
+                                  setNewSalesOrder({ ...newSalesOrder, order_lines: updatedLines });
+                                }}
+                                placeholder="e.g., Product A"
+                              />
+                            </div>
+                            <div className="space-y-2">
+                              <Label htmlFor="line_quantity">Quantity</Label>
+                              <Input
+                                id="line_quantity"
+                                type="number"
+                                value={newSalesOrder.order_lines[0]?.quantity || 0}
+                                onChange={(e) => {
+                                  const updatedLines = [...newSalesOrder.order_lines];
+                                  if (!updatedLines[0]) updatedLines[0] = { line_number: 1, description: '', quantity: 0, unit_price: 0 };
+                                  updatedLines[0].quantity = parseFloat(e.target.value);
+                                  setNewSalesOrder({ ...newSalesOrder, order_lines: updatedLines });
+                                }}
+                                placeholder="e.g., 1"
+                              />
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div className="space-y-2">
+                              <Label htmlFor="line_unit_price">Unit Price</Label>
+                              <Input
+                                id="line_unit_price"
+                                type="number"
+                                value={newSalesOrder.order_lines[0]?.unit_price || 0}
+                                onChange={(e) => {
+                                  const updatedLines = [...newSalesOrder.order_lines];
+                                  if (!updatedLines[0]) updatedLines[0] = { line_number: 1, description: '', quantity: 0, unit_price: 0 };
+                                  updatedLines[0].unit_price = parseFloat(e.target.value);
+                                  setNewSalesOrder({ ...newSalesOrder, order_lines: updatedLines });
+                                }}
+                                placeholder="e.g., 100.00"
+                              />
+                            </div>
+                            <div className="space-y-2">
+                              <Label htmlFor="line_tax_rate">Tax Rate (%)</Label>
+                              <Input
+                                id="line_tax_rate"
+                                type="number"
+                                value={newSalesOrder.order_lines[0]?.tax_rate || 0}
+                                onChange={(e) => {
+                                  const updatedLines = [...newSalesOrder.order_lines];
+                                  if (!updatedLines[0]) updatedLines[0] = { line_number: 1, description: '', quantity: 0, unit_price: 0 };
+                                  updatedLines[0].tax_rate = parseFloat(e.target.value);
+                                  setNewSalesOrder({ ...newSalesOrder, order_lines: updatedLines });
+                                }}
+                                placeholder="e.g., 0.05 (for 5%)"
+                              />
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="space-y-2">
+                          <Label htmlFor="notes_so">Notes</Label>
+                          <Textarea
+                            id="notes_so"
+                            value={newSalesOrder.notes || ''}
+                            onChange={(e) => setNewSalesOrder({ ...newSalesOrder, notes: e.target.value })}
+                            placeholder="Add any relevant notes here..."
+                            rows={3}
+                          />
+                        </div>
+
+                        <div className="flex space-x-2">
+                          <Button onClick={async () => {
+                            // Calculate total amount and tax amount for the sales order
+                            const totalAmount = newSalesOrder.order_lines.reduce((sum, line) => {
+                                const lineTotal = (line.quantity || 0) * (line.unit_price || 0);
+                                const taxRateDecimal = (line.tax_rate || 0) / 100; // Convert percentage to decimal
+                                const taxAmount = lineTotal * taxRateDecimal;
+                                return sum + lineTotal + taxAmount;
+                            }, 0);
+
+                            const totalTaxAmount = newSalesOrder.order_lines.reduce((sum, line) => {
+                                const lineTotal = (line.quantity || 0) * (line.unit_price || 0);
+                                const taxRateDecimal = (line.tax_rate || 0) / 100; // Convert percentage to decimal
+                                return sum + (lineTotal * taxRateDecimal);
+                            }, 0);
+
+                            // Update newSalesOrder with calculated totals and a dummy order_number
+                            const salesOrderToCreate = {
+                                ...newSalesOrder,
+                                total_amount: totalAmount,
+                                tax_amount: totalTaxAmount,
+                                order_number: `SO-${Date.now()}`, // Generate a unique order number
+                            };
+
+                            if (
+                              !salesOrderToCreate.tenant_id ||
+                              !salesOrderToCreate.customer_id ||
+                              salesOrderToCreate.order_lines.length === 0 ||
+                              (salesOrderToCreate.order_lines[0].description === '' || salesOrderToCreate.order_lines[0].quantity <= 0 || salesOrderToCreate.order_lines[0].unit_price <= 0)
+                            ) {
+                                toast({
+                                    title: "Error",
+                                    description: "Tenant ID, Customer, and at least one complete Order Line (Description, Quantity, Unit Price) are mandatory fields.",
+                                    variant: "destructive",
+                                });
+                                return;
+                            }
+
+                            try {
+                                await createSalesOrder(salesOrderToCreate);
+                                toast({
+                                    title: "Sales Order Created",
+                                    description: `Sales Order ${salesOrderToCreate.order_number} has been created successfully.`,
+                                });
+                                setNewSalesOrder({
+                                    tenant_id: "",
+                                    customer_id: "",
+                                    order_date: new Date().toISOString(), // Changed to full ISO string
+                                    requested_delivery_date: "",
+                                    payment_terms: "Net 30",
+                                    order_lines: [],
+                                    notes: "",
+                                });
+                                setSalesOrderView("list");
+                            } catch (error: any) {
+                                toast({
+                                    title: "Error",
+                                    description: error.message || "Failed to create sales order.",
+                                    variant: "destructive",
+                                });
+                            }
+                          }} className="bg-teal-600 hover:bg-teal-700">
+                            Create Sales Order
+                          </Button>
+                          <Button variant="outline" onClick={() => setSalesOrderView("list")}>
+                            Cancel
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                  </TabsContent>
                 </Tabs>
               </CardContent>
             </Card>
           </div>
 
           {/* Detail Panel - Conditional */}
-          {showDetailPanel && (
+          {showDetailPanel && selectedItem && (
             <div className="lg:col-span-2">
               <Card className="h-full">
                 <CardHeader>
                   <div className="flex items-center justify-between">
                     <CardTitle>
-                      {selectedItem
-                        ? activeTab === "payments"
-                          ? `Payment: ${(selectedItem as ARPayment).paymentId}`
-                          : `Remittance: ${(selectedItem as ARRemittance).remitId}`
-                        : "Select an item"}
+                      Payment: {selectedItem.payment_number}
                     </CardTitle>
                     <Button variant="ghost" size="icon" onClick={handleCloseDetailPanel} className="h-6 w-6">
                       <X className="h-4 w-4" />
@@ -2037,230 +2134,80 @@ export default function AccountsReceivablePage() {
                   </div>
                 </CardHeader>
                 <CardContent>
-                  {selectedItem && (
-                    <ScrollArea className="h-[600px]">
-                      <div className="space-y-6">
-                        {/* Header */}
-                        {selectedItem && (
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <p className="font-medium">{selectedItem.customer}</p>
-                              <StatusBadge
-                                status={activeTab === "payments"
-                                  ? (selectedItem as ARPayment).status
-                                  : (selectedItem as ARRemittance).status}
-                              />
-                            </div>
-                            <Badge variant="outline" className="bg-blue-50 text-blue-700">
-                              {selectedItem.confidence}% confidence
-                            </Badge>
-                          </div>
-                        )}
-
-                        <Separator />
-
-                        {/* Document Viewer */}
+                  <ScrollArea className="h-[600px]">
+                    <div className="space-y-6">
+                      {/* Header */}
+                      <div className="flex items-center justify-between">
                         <div>
-                          <h3 className="font-medium mb-2">Document Viewer</h3>
-                          <div className="p-8 bg-gray-50 text-center">
-                            <Eye className="h-12 w-12 mx-auto text-gray-400 mb-2" />
-                            <p className="text-sm text-gray-500">
-                              {activeTab === "payments"
-                                ? "Remittance PDF or bank transaction record"
-                                : "Remittance advice document"}
-                            </p>
+                          <p className="font-medium">{customers.find(c => c.id === selectedItem.customer_id)?.name || selectedItem.customer_id}</p>
+                          <StatusBadge status={selectedItem.status} />
+                        </div>
+                        <Badge variant="outline" className="bg-blue-50 text-blue-700">
+                          {selectedItem.status === "RECONCILED" ? "Reconciled" : "Pending"}
+                        </Badge>
+                      </div>
+
+                      <Separator />
+
+                      {/* Document Viewer */}
+                      <div>
+                        <h3 className="font-medium mb-2">Document Viewer</h3>
+                        <div className="p-8 bg-gray-50 text-center">
+                          <Eye className="h-12 w-12 mx-auto text-gray-400 mb-2" />
+                          <p className="text-sm text-gray-500">
+                            Payment record details
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Payment Details */}
+                      <div>
+                        <h3 className="font-medium mb-2">Payment Details</h3>
+                        <div className="space-y-2 text-sm">
+                          <div className="flex justify-between">
+                            <span className="text-gray-500">Payment Date:</span>
+                            <span>{formatDate(selectedItem.payment_date)}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-gray-500">Total Amount:</span>
+                            <span>{formatCurrency(selectedItem.amount, selectedItem.currency)}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-gray-500">Payment Method:</span>
+                            <span>{selectedItem.payment_method}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-gray-500">Reference Number:</span>
+                            <span>{selectedItem.reference_number || "N/A"}</span>
                           </div>
                         </div>
-
-                        {activeTab === "payments" && (
-                          <>
-                            {/* Payment Details */}
-                            <div>
-                              <h3 className="font-medium mb-2">Payment Details</h3>
-                              <div className="space-y-2 text-sm">
-                                <div className="flex justify-between">
-                                  <span className="text-gray-500">Payment Date:</span>
-                                  <span>{new Date((selectedItem as ARPayment).datePaid).toLocaleDateString()}</span>
-                                </div>
-                                <div className="flex justify-between">
-                                  <span className="text-gray-500">Total Amount:</span>
-                                  <span>${(selectedItem as ARPayment).amount.toLocaleString()}</span>
-                                </div>
-                                <div className="flex justify-between">
-                                  <span className="text-gray-500">Applied Amount:</span>
-                                  <span>${(selectedItem as ARPayment).appliedAmount?.toLocaleString() || "0"}</span>
-                                </div>
-                                <div className="flex justify-between">
-                                  <span className="text-gray-500">Remaining Amount:</span>
-                                  <span>${(selectedItem as ARPayment).remainingAmount?.toLocaleString() || "0"}</span>
-                                </div>
-                              </div>
-                            </div>
-
-                            {/* Applied Invoices */}
-                            <div>
-                              <h3 className="font-medium mb-2">Applied Invoices</h3>
-                              <div className="space-y-2">
-                                <div className="p-3 bg-gray-50 rounded-lg">
-                                  <div className="flex justify-between items-center">
-                                    <span className="text-sm">INV-2024-001</span>
-                                    <span className="text-sm font-medium">$5,000</span>
-                                  </div>
-                                  <div className="text-xs text-gray-500 mt-1">Applied automatically</div>
-                                </div>
-                                <div className="p-3 bg-gray-50 rounded-lg">
-                                  <div className="flex justify-between items-center">
-                                    <span className="text-sm">INV-2024-002</span>
-                                    <span className="text-sm font-medium">$3,000</span>
-                                  </div>
-                                  <div className="text-xs text-gray-500 mt-1">Applied automatically</div>
-                                </div>
-                              </div>
-                            </div>
-
-                            {/* Unmatched Balance */}
-                            {(selectedItem as ARPayment).remainingAmount! > 0 && (
-                              <div>
-                                <h3 className="font-medium mb-2">Unmatched Balance</h3>
-                                <div className="p-3 bg-amber-50 rounded-lg">
-                                  <div className="flex justify-between items-center">
-                                    <span className="text-sm text-amber-700">Remaining Balance</span>
-                                    <span className="text-sm font-medium text-amber-700">
-                                      ${(selectedItem as ARPayment).remainingAmount?.toLocaleString()}
-                                    </span>
-                                  </div>
-                                  <div className="text-xs text-amber-600 mt-1">Requires manual application</div>
-                                </div>
-                              </div>
-                            )}
-
-                            {/* Actions */}
-                            <div className="flex space-x-2">
-                              <Button
-                                size="sm"
-                                className="bg-teal-600 hover:bg-teal-700"
-                                onClick={() => handleApplyRemaining(selectedItem.id)}
-                              >
-                                <Check className="mr-2 h-4 w-4" />
-                                Apply Remaining
-                              </Button>
-                              <Button size="sm" variant="outline" onClick={() => handleSendReminder(selectedItem.id)}>
-                                <Send className="mr-2 h-4 w-4" />
-                                Send Reminder
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => handleReclassifyPayment(selectedItem.id)}
-                              >
-                                <MessageSquare className="mr-2 h-4 w-4" />
-                                Reclassify Payment
-                              </Button>
-                            </div>
-                          </>
-                        )}
-
-                        {activeTab === "remittances" && (
-                          <>
-                            {/* Remittance Details */}
-                            <div>
-                              <h3 className="font-medium mb-2">Remittance Details</h3>
-                              <div className="space-y-2 text-sm">
-                                <div className="flex justify-between">
-                                  <span className="text-gray-500">Date Received:</span>
-                                  <span>
-                                    {new Date((selectedItem as ARRemittance).dateReceived).toLocaleDateString()}
-                                  </span>
-                                </div>
-                                <div className="flex justify-between">
-                                  <span className="text-gray-500">Amount:</span>
-                                  <span>${(selectedItem as ARRemittance).amount.toLocaleString()}</span>
-                                </div>
-                                <div className="flex justify-between">
-                                  <span className="text-gray-500">File Type:</span>
-                                  <FileTypeBadge fileType={(selectedItem as ARRemittance).fileType} />
-                                </div>
-                                <div className="flex justify-between">
-                                  <span className="text-gray-500">Matched:</span>
-                                  <span>{(selectedItem as ARRemittance).matched ? "Yes" : "No"}</span>
-                                </div>
-                              </div>
-                            </div>
-
-                            {/* Extracted Fields */}
-                            <div>
-                              <h3 className="font-medium mb-2">Extracted Fields</h3>
-                              <div className="space-y-2 text-sm">
-                                <div className="flex justify-between">
-                                  <span className="text-gray-500">Invoice References:</span>
-                                  <span>INV-2024-001, INV-2024-002</span>
-                                </div>
-                                <div className="flex justify-between">
-                                  <span className="text-gray-500">Bank TXN ID:</span>
-                                  <span>TXN-789456123</span>
-                                </div>
-                              </div>
-                            </div>
-
-                            {/* Match Suggestions */}
-                            <div>
-                              <h3 className="font-medium mb-2">Match Suggestions</h3>
-                              <div className="space-y-2">
-                                <div className="p-3 bg-gray-50 rounded-lg">
-                                  <div className="flex justify-between items-center">
-                                    <span className="text-sm">PMT-890 - ACME Corp</span>
-                                    <Badge variant="outline" className="bg-green-50 text-green-700">
-                                      96% match
-                                    </Badge>
-                                  </div>
-                                </div>
-                                <div className="p-3 bg-gray-50 rounded-lg">
-                                  <div className="flex justify-between items-center">
-                                    <span className="text-sm">PMT-891 - ACME Corp</span>
-                                    <Badge variant="outline" className="bg-blue-50 text-blue-700">
-                                      82% match
-                                    </Badge>
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
-
-                            {/* Actions */}
-                            <div className="flex space-x-2">
-                              <Button
-                                size="sm"
-                                className="bg-teal-600 hover:bg-teal-700"
-                                onClick={() => {
-                                  // Placeholder for Review & Reconcile action
-                                  toast({
-                                    title: "Review & Reconcile",
-                                    description: `Opening review for remittance ${selectedItem.id}`,
-                                  })
-                                }}
-                              >
-                                <Check className="mr-2 h-4 w-4" />
-                                Review & Reconcile
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="destructive"
-                                onClick={() => {
-                                  // Placeholder for Reject Remittance action
-                                  toast({
-                                    title: "Reject Remittance",
-                                    description: `Marking remittance ${selectedItem.id} for dispute`,
-                                  })
-                                }}
-                              >
-                                <X className="mr-2 h-4 w-4" />
-                                Reject Remittance
-                              </Button>
-                            </div>
-                          </>
-                        )}
                       </div>
-                    </ScrollArea>
-                  )}
+
+                      {/* Actions */}
+                      <div className="flex space-x-2">
+                        <Button
+                          size="sm"
+                          className="bg-teal-600 hover:bg-teal-700"
+                          onClick={() => handleApplyRemaining(selectedItem.id)}
+                        >
+                          <Check className="mr-2 h-4 w-4" />
+                          Apply Remaining
+                        </Button>
+                        <Button size="sm" variant="outline" onClick={() => handleSendReminder(selectedItem.id)}>
+                          <Send className="mr-2 h-4 w-4" />
+                          Send Reminder
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleReclassifyPayment(selectedItem.id)}
+                        >
+                          <MessageSquare className="mr-2 h-4 w-4" />
+                          Reclassify Payment
+                        </Button>
+                      </div>
+                    </div>
+                  </ScrollArea>
                 </CardContent>
               </Card>
             </div>

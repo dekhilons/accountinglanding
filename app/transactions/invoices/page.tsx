@@ -1,8 +1,8 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { useSearchParams } from "next/navigation"
-import { Check, Filter, Download, Upload, Clock, CheckCircle, XCircle, DollarSign, Receipt } from "lucide-react"
+import { Check, Filter, Download, Upload, Clock, CheckCircle, XCircle, DollarSign, Receipt, Loader2 } from "lucide-react"
 import { AppShell } from "@/components/layout/app-shell"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -14,6 +14,7 @@ import { ApprovalCard } from "@/components/ui/approval-card"
 import { Badge } from "@/components/ui/badge"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useToast } from "@/hooks/use-toast"
+import { useSalesOrders, SalesOrder } from "@/lib/ar-api" // Import useSalesOrders and SalesOrder
 
 // Define column types
 type Invoice = {
@@ -24,8 +25,8 @@ type Invoice = {
   currency: string
   date: string
   dueDate: string
-  status: "pending" | "approved" | "rejected" | "paid"
-  type: "ap" | "ar"
+  status: "pending" | "approved" | "rejected" | "paid" | "open" | "fulfilled" | "cancelled" // Added sales order statuses
+  type: "ap" | "ar" | "so" // Added 'so' for sales order
 }
 
 export default function InvoicesPage() {
@@ -40,17 +41,23 @@ export default function InvoicesPage() {
   const [typeFilter, setTypeFilter] = useState("all")
   const [dateRange, setDateRange] = useState("all")
 
+  // Hardcoded tenant_id for now, replace with dynamic value if available
+  const TENANT_ID = "test-tenant" 
+
+  // Fetch sales orders using the hook
+  const { orders: salesOrders, loading: loadingSalesOrders, error: salesOrdersError } = useSalesOrders(TENANT_ID)
+
   // Set initial tab based on URL parameter
   useEffect(() => {
     const tab = searchParams.get("tab")
-    if (tab === "ap" || tab === "ar") {
+    if (tab === "ap" || tab === "ar" || tab === "so") { // Added 'so' tab
       setActiveTab(tab)
       setTypeFilter(tab)
     }
   }, [searchParams])
 
-  // Sample data
-  const invoices: Invoice[] = [
+  // Sample data (will be combined with fetched data)
+  const sampleInvoices: Invoice[] = [
     {
       id: "inv-1234",
       invoiceNumber: "INV-1234",
@@ -84,59 +91,33 @@ export default function InvoicesPage() {
       status: "paid",
       type: "ap",
     },
-    {
-      id: "rec-4567",
-      invoiceNumber: "REC-4567",
-      vendor: "Client XYZ Corp",
-      amount: 7500.0,
-      currency: "USD",
-      date: "2024-05-14",
-      dueDate: "2024-06-14",
-      status: "pending",
-      type: "ar",
-    },
-    {
-      id: "rec-4568",
-      invoiceNumber: "REC-4568",
-      vendor: "Customer ABC Inc.",
-      amount: 12000.0,
-      currency: "USD",
-      date: "2024-05-08",
-      dueDate: "2024-06-08",
-      status: "paid",
-      type: "ar",
-    },
-    {
-      id: "inv-1237",
-      invoiceNumber: "INV-1237",
-      vendor: "Utilities Company",
-      amount: 850.0,
-      currency: "USD",
-      date: "2024-05-16",
-      dueDate: "2024-06-16",
-      status: "approved",
-      type: "ap",
-    },
-    {
-      id: "rec-4569",
-      invoiceNumber: "REC-4569",
-      vendor: "Enterprise Client Ltd.",
-      amount: 25000.0,
-      currency: "USD",
-      date: "2024-05-13",
-      dueDate: "2024-06-13",
-      status: "approved",
-      type: "ar",
-    },
   ]
 
+  // Combine sample invoices with fetched sales orders
+  const allInvoices: Invoice[] = useMemo(() => {
+    const mappedSalesOrders: Invoice[] = salesOrders.map((order: SalesOrder) => ({
+      id: order.id,
+      invoiceNumber: order.order_number,
+      vendor: `Customer: ${order.customer_id}`, // Placeholder, ideally resolve customer name
+      amount: order.total_amount,
+      currency: order.currency,
+      date: order.order_date,
+      dueDate: order.order_date, // Using order_date as dueDate for simplicity
+      status: order.status.toLowerCase() as Invoice["status"], // Map sales order status to invoice status
+      type: "so", // Mark as sales order
+    }))
+
+    return [...sampleInvoices, ...mappedSalesOrders]
+  }, [salesOrders, sampleInvoices]) // Depend on salesOrders and sampleInvoices
+
   // Filter invoices based on active tab and filters
-  const filteredInvoices = invoices.filter((invoice) => {
+  const filteredInvoices = allInvoices.filter((invoice: Invoice) => { // Explicitly type invoice
     const matchesTab =
       activeTab === "all" ||
       (activeTab === "pending" && invoice.status === "pending") ||
       (activeTab === "ap" && invoice.type === "ap") ||
-      (activeTab === "ar" && invoice.type === "ar")
+      (activeTab === "ar" && invoice.type === "ar") ||
+      (activeTab === "so" && invoice.type === "so") // Filter for sales orders
 
     const matchesStatus = statusFilter === "all" || invoice.status === statusFilter
     const matchesType = typeFilter === "all" || invoice.type === typeFilter
@@ -146,19 +127,33 @@ export default function InvoicesPage() {
 
   // Get summary statistics
   const getSummaryStats = () => {
-    const apInvoices = invoices.filter((inv) => inv.type === "ap")
-    const arInvoices = invoices.filter((inv) => inv.type === "ar")
+    const apInvoices = allInvoices.filter((inv: Invoice) => inv.type === "ap") // Explicitly type inv
+    const arInvoices = allInvoices.filter((inv: Invoice) => inv.type === "ar") // Explicitly type inv
+    const soInvoices = allInvoices.filter((inv: Invoice) => inv.type === "so") // Explicitly type inv
 
     return {
-      totalAP: apInvoices.reduce((sum, inv) => sum + inv.amount, 0),
-      totalAR: arInvoices.reduce((sum, inv) => sum + inv.amount, 0),
-      pendingAP: apInvoices.filter((inv) => inv.status === "pending").length,
-      pendingAR: arInvoices.filter((inv) => inv.status === "pending").length,
-      totalPending: invoices.filter((inv) => inv.status === "pending").length,
+      totalAP: apInvoices.reduce((sum: number, inv: Invoice) => sum + inv.amount, 0), // Explicitly type sum and inv
+      totalAR: arInvoices.reduce((sum: number, inv: Invoice) => sum + inv.amount, 0), // Explicitly type sum and inv
+      totalSO: soInvoices.reduce((sum: number, inv: Invoice) => sum + inv.amount, 0), // Explicitly type sum and inv
+      pendingAP: apInvoices.filter((inv: Invoice) => inv.status === "pending").length, // Explicitly type inv
+      pendingAR: arInvoices.filter((inv: Invoice) => inv.status === "pending").length, // Explicitly type inv
+      pendingSO: soInvoices.filter((inv: Invoice) => inv.status === "pending" || inv.status === "open").length, // Sales orders might have 'open' status, Explicitly type inv
+      totalPending: allInvoices.filter((inv: Invoice) => inv.status === "pending" || inv.status === "open").length, // Explicitly type inv
     }
   }
 
   const stats = getSummaryStats()
+
+  // Handle sales orders fetch error
+  useEffect(() => {
+    if (salesOrdersError) {
+      toast({
+        title: "Error fetching sales orders",
+        description: salesOrdersError.message,
+        variant: "destructive",
+      })
+    }
+  }, [salesOrdersError, toast])
 
   // Document types for uploader
   const documentTypes = [
@@ -166,6 +161,7 @@ export default function InvoicesPage() {
     { value: "AR_RECEIPT", label: "AR Receipt" },
     { value: "EXPENSE_REPORT", label: "Expense Report" },
     { value: "PURCHASE_ORDER", label: "Purchase Order" },
+    { value: "SALES_ORDER", label: "Sales Order" }, // Added Sales Order
   ]
 
   // Handle file upload
@@ -245,17 +241,19 @@ export default function InvoicesPage() {
   const StatusBadge = ({ status }: { status: Invoice["status"] }) => {
     switch (status) {
       case "pending":
+      case "open": // Added for Sales Orders
         return (
           <Badge variant="outline" className="bg-amber-100 text-amber-800 hover:bg-amber-100">
             <Clock className="mr-1 h-3 w-3" />
-            Pending
+            {status === "pending" ? "Pending" : "Open"}
           </Badge>
         )
       case "approved":
+      case "fulfilled": // Added for Sales Orders
         return (
           <Badge variant="outline" className="bg-blue-100 text-blue-800 hover:bg-blue-100">
             <CheckCircle className="mr-1 h-3 w-3" />
-            Approved
+            {status === "approved" ? "Approved" : "Fulfilled"}
           </Badge>
         )
       case "paid":
@@ -266,10 +264,11 @@ export default function InvoicesPage() {
           </Badge>
         )
       case "rejected":
+      case "cancelled": // Added for Sales Orders
         return (
           <Badge variant="outline" className="bg-red-100 text-red-800 hover:bg-red-100">
             <XCircle className="mr-1 h-3 w-3" />
-            Rejected
+            {status === "rejected" ? "Rejected" : "Cancelled"}
           </Badge>
         )
       default:
@@ -281,7 +280,7 @@ export default function InvoicesPage() {
   const columns = [
     {
       accessorKey: "invoiceNumber",
-      header: "Invoice #",
+      header: "Document #", // Changed to be more generic
     },
     {
       accessorKey: "vendor",
@@ -318,9 +317,21 @@ export default function InvoicesPage() {
       header: "Type",
       cell: ({ row }: any) => {
         const type = row.getValue("type")
+        let badgeText = ""
+        let badgeClass = ""
+        if (type === "ap") {
+          badgeText = "Payable"
+          badgeClass = "bg-red-50 text-red-700"
+        } else if (type === "ar") {
+          badgeText = "Receivable"
+          badgeClass = "bg-green-50 text-green-700"
+        } else if (type === "so") {
+          badgeText = "Sales Order"
+          badgeClass = "bg-blue-50 text-blue-700"
+        }
         return (
-          <Badge variant="outline" className={type === "ap" ? "bg-red-50 text-red-700" : "bg-green-50 text-green-700"}>
-            {type === "ap" ? "Payable" : "Receivable"}
+          <Badge variant="outline" className={badgeClass}>
+            {badgeText}
           </Badge>
         )
       },
@@ -339,8 +350,8 @@ export default function InvoicesPage() {
       <div className="space-y-6">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight">Invoices</h1>
-            <p className="text-muted-foreground">Manage accounts payable and receivable invoices</p>
+            <h1 className="text-2xl font-bold tracking-tight">Documents</h1> {/* Changed title */}
+            <p className="text-muted-foreground">Manage accounts payable, receivable, and sales orders</p> {/* Updated description */}
           </div>
           <div className="mt-4 sm:mt-0 flex flex-col sm:flex-row gap-2">
             <Button variant="outline" onClick={() => setIsFilterModalOpen(true)}>
@@ -386,10 +397,10 @@ export default function InvoicesPage() {
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-gray-500">Pending AP</p>
-                  <p className="text-2xl font-bold">{stats.pendingAP}</p>
+                  <p className="text-sm text-gray-500">Total Sales Orders</p> {/* New card for Sales Orders */}
+                  <p className="text-2xl font-bold">${stats.totalSO.toLocaleString()}</p>
                 </div>
-                <Clock className="h-8 w-8 text-amber-500" />
+                <Receipt className="h-8 w-8 text-blue-500" /> {/* Different icon/color for SO */}
               </div>
             </CardContent>
           </Card>
@@ -397,10 +408,10 @@ export default function InvoicesPage() {
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-gray-500">Pending AR</p>
-                  <p className="text-2xl font-bold">{stats.pendingAR}</p>
+                  <p className="text-sm text-gray-500">Total Pending</p> {/* Combined pending */}
+                  <p className="text-2xl font-bold">{stats.totalPending}</p>
                 </div>
-                <Clock className="h-8 w-8 text-blue-500" />
+                <Clock className="h-8 w-8 text-amber-500" />
               </div>
             </CardContent>
           </Card>
@@ -408,58 +419,79 @@ export default function InvoicesPage() {
 
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle>Invoice Management</CardTitle>
-            <CardDescription>View, approve, and manage all invoices and receipts</CardDescription>
+            <CardTitle>Document Management</CardTitle> {/* Changed title */}
+            <CardDescription>View, approve, and manage all financial documents</CardDescription> {/* Updated description */}
           </CardHeader>
           <CardContent>
             <Tabs defaultValue="all" value={activeTab} onValueChange={setActiveTab}>
               <TabsList className="mb-4">
-                <TabsTrigger value="all">All Invoices</TabsTrigger>
+                <TabsTrigger value="all">All Documents</TabsTrigger> {/* Changed text */}
                 <TabsTrigger value="pending">
                   Pending Approval
                   <Badge className="ml-2 bg-amber-500">{stats.totalPending}</Badge>
                 </TabsTrigger>
                 <TabsTrigger value="ap">
                   Accounts Payable
-                  <Badge className="ml-2 bg-red-500">{invoices.filter((i) => i.type === "ap").length}</Badge>
+                  <Badge className="ml-2 bg-red-500">{allInvoices.filter((i) => i.type === "ap").length}</Badge>
                 </TabsTrigger>
                 <TabsTrigger value="ar">
                   Accounts Receivable
-                  <Badge className="ml-2 bg-green-500">{invoices.filter((i) => i.type === "ar").length}</Badge>
+                  <Badge className="ml-2 bg-green-500">{allInvoices.filter((i) => i.type === "ar").length}</Badge>
+                </TabsTrigger>
+                <TabsTrigger value="so"> {/* New tab for Sales Orders */}
+                  Sales Orders
+                  <Badge className="ml-2 bg-blue-500">{allInvoices.filter((i) => i.type === "so").length}</Badge>
                 </TabsTrigger>
               </TabsList>
-              <TabsContent value="all" className="m-0">
-                <DataTable
-                  columns={columns}
-                  data={filteredInvoices}
-                  searchColumn="vendor"
-                  onRowClick={handleRowClick}
-                />
-              </TabsContent>
-              <TabsContent value="pending" className="m-0">
-                <DataTable
-                  columns={columns}
-                  data={filteredInvoices}
-                  searchColumn="vendor"
-                  onRowClick={handleRowClick}
-                />
-              </TabsContent>
-              <TabsContent value="ap" className="m-0">
-                <DataTable
-                  columns={columns}
-                  data={filteredInvoices}
-                  searchColumn="vendor"
-                  onRowClick={handleRowClick}
-                />
-              </TabsContent>
-              <TabsContent value="ar" className="m-0">
-                <DataTable
-                  columns={columns}
-                  data={filteredInvoices}
-                  searchColumn="vendor"
-                  onRowClick={handleRowClick}
-                />
-              </TabsContent>
+              {loadingSalesOrders ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="mr-2 h-6 w-6 animate-spin" />
+                  Loading sales orders...
+                </div>
+              ) : (
+                <>
+                  <TabsContent value="all" className="m-0">
+                    <DataTable
+                      columns={columns}
+                      data={filteredInvoices}
+                      searchColumn="vendor"
+                      onRowClick={handleRowClick}
+                    />
+                  </TabsContent>
+                  <TabsContent value="pending" className="m-0">
+                    <DataTable
+                      columns={columns}
+                      data={filteredInvoices}
+                      searchColumn="vendor"
+                      onRowClick={handleRowClick}
+                    />
+                  </TabsContent>
+                  <TabsContent value="ap" className="m-0">
+                    <DataTable
+                      columns={columns}
+                      data={filteredInvoices}
+                      searchColumn="vendor"
+                      onRowClick={handleRowClick}
+                    />
+                  </TabsContent>
+                  <TabsContent value="ar" className="m-0">
+                    <DataTable
+                      columns={columns}
+                      data={filteredInvoices}
+                      searchColumn="vendor"
+                      onRowClick={handleRowClick}
+                    />
+                  </TabsContent>
+                  <TabsContent value="so" className="m-0"> {/* New tab content for Sales Orders */}
+                    <DataTable
+                      columns={columns}
+                      data={filteredInvoices}
+                      searchColumn="vendor"
+                      onRowClick={handleRowClick}
+                    />
+                  </TabsContent>
+                </>
+              )}
             </Tabs>
           </CardContent>
         </Card>
@@ -494,6 +526,8 @@ export default function InvoicesPage() {
                 <SelectItem value="pending">Pending</SelectItem>
                 <SelectItem value="approved">Approved</SelectItem>
                 <SelectItem value="paid">Paid</SelectItem>
+                <SelectItem value="rejected">Rejected</SelectItem>
+                <SelectItem value="cancelled">Cancelled</SelectItem>
                 <SelectItem value="rejected">Rejected</SelectItem>
               </SelectContent>
             </Select>

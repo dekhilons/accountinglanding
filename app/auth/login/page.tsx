@@ -160,22 +160,6 @@ export default function LoginPage() {
               </Button>
             </form>
 
-            <div className="mt-6">
-              <div className="relative">
-                <div className="absolute inset-0 flex items-center">
-                  <div className="w-full border-t border-gray-300" />
-                </div>
-                <div className="relative flex justify-center text-sm">
-                  <span className="px-2 bg-white text-gray-500">Demo Credentials</span>
-                </div>
-              </div>
-
-              <div className="mt-4 p-4 bg-gray-50 rounded-md">
-                <p className="text-sm text-gray-600 mb-2">Use these credentials to test the platform:</p>
-                <p className="text-sm font-mono">Email: demo@accountingai.com</p>
-                <p className="text-sm font-mono">Password: demo123</p>
-              </div>
-            </div>
           </CardContent>
         </Card>
       </div>
