@@ -312,6 +312,17 @@ export interface SalesOrder {
   credit_status: string;
   approval_date?: string;
   created_at: string;
+  order_lines: SalesOrderLine[];
+  notes?: string;
+  // Fulfillment fields
+  fulfillment_status?: 'PENDING' | 'IN_PROGRESS' | 'FULFILLED' | 'SHIPPED' | 'DELIVERED';
+  requested_delivery_date?: string; // Add this line
+  fulfillment_date?: string;
+  tracking_number?: string;
+  carrier?: string;
+  shipping_address?: string;
+  delivery_date?: string;
+  fulfillment_notes?: string;
 }
 
 export interface SalesOrderCreate {
@@ -332,6 +343,24 @@ export interface CreditDecisionRequest {
 export interface InvoiceGenerationRequest {
   template_id?: string;
   payment_terms?: string;
+}
+
+// Fulfillment interfaces
+export interface FulfillmentUpdateRequest {
+  fulfillment_status: 'PENDING' | 'IN_PROGRESS' | 'FULFILLED' | 'SHIPPED' | 'DELIVERED';
+  fulfillment_date?: string;
+  tracking_number?: string;
+  carrier?: string;
+  shipping_address?: string;
+  delivery_date?: string;
+  fulfillment_notes?: string;
+}
+
+export interface FulfillmentResponse {
+  success: boolean;
+  order_id: string;
+  fulfillment_status: string;
+  message: string;
 }
 
 // API Error handling
@@ -813,6 +842,23 @@ export const salesOrdersAPI = {
       body: JSON.stringify({ ...invoice_data, tenant_id }),
     });
   },
+
+  // Update fulfillment status
+  async updateFulfillment(
+    order_id: string,
+    fulfillment_data: FulfillmentUpdateRequest,
+    tenant_id: string
+  ): Promise<FulfillmentResponse> {
+    return apiRequest<FulfillmentResponse>(`/sales-orders/${order_id}/fulfillment`, {
+      method: 'PUT',
+      body: JSON.stringify({ ...fulfillment_data, tenant_id }),
+    });
+  },
+
+  // Get fulfillment history
+  async getFulfillmentHistory(order_id: string, tenant_id: string): Promise<any[]> {
+    return apiRequest<any[]>(`/sales-orders/${order_id}/fulfillment-history?tenant_id=${tenant_id}`);
+  },
 };
 
 // React hooks for API integration
@@ -1171,6 +1217,10 @@ export function useSalesOrders(tenant_id?: string) {
       salesOrdersAPI.makeCreditDecision(order_id, decision_data, tenant_id!, user_id),
     generateInvoice: (order_id: string, invoice_data: InvoiceGenerationRequest) =>
       salesOrdersAPI.generateInvoice(order_id, invoice_data, tenant_id!),
+    updateFulfillment: (order_id: string, fulfillment_data: FulfillmentUpdateRequest) =>
+      salesOrdersAPI.updateFulfillment(order_id, fulfillment_data, tenant_id!),
+    getFulfillmentHistory: (order_id: string) =>
+      salesOrdersAPI.getFulfillmentHistory(order_id, tenant_id!),
   };
 }
 

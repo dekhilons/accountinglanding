@@ -75,6 +75,7 @@ import { InvoicesSection } from "./components/InvoicesSection"
 import { SalesOrdersSection } from "./components/SalesOrdersSection"
 import { CreditManagementSection } from "./components/CreditManagementSection"
 import { AgingReportsSection } from "./components/AgingReportsSection"
+import { O2CWorkflowVisualizer } from "./components/O2CWorkflowVisualizer"
 
 
 export default function AccountsReceivablePage() {
@@ -327,6 +328,10 @@ export default function AccountsReceivablePage() {
                       Sales Orders
                       <Badge className="ml-2 bg-green-500">{salesOrders.length}</Badge>
                     </TabsTrigger>
+                    <TabsTrigger value="o2c-workflow">
+                      O2C Workflow
+                      <Badge className="ml-2 bg-purple-500">AR</Badge>
+                    </TabsTrigger>
                   </TabsList>
 
                   <TabsContent value="payments" className="space-y-4">
@@ -459,6 +464,31 @@ export default function AccountsReceivablePage() {
                   <TabsContent value="sales-orders" className="space-y-4">
                     {/* Sales orders section */}
                     <SalesOrdersSection customers={customers} />
+                  </TabsContent>
+
+                  <TabsContent value="o2c-workflow" className="space-y-4">
+                    {/* O2C Workflow visualization */}
+                    <div className="space-y-4">
+                      <div>
+                        <h3 className="text-lg font-medium">Order-to-Cash Workflow Overview</h3>
+                        <p className="text-muted-foreground">Visualize and track the complete order-to-cash process for your sales orders.</p>
+                      </div>
+
+                      {salesOrders.length === 0 ? (
+                        <div className="text-center py-8">
+                          <p className="text-muted-foreground">No sales orders available to display workflow.</p>
+                        </div>
+                      ) : (
+                        <div className="grid gap-6">
+                          {salesOrders.slice(0, 3).map((order) => (
+                            <O2CWorkflowVisualizer
+                              key={order.id}
+                              salesOrder={order}
+                            />
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   </TabsContent>
                 </Tabs>
               </CardContent>
