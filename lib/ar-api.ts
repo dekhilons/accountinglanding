@@ -289,6 +289,21 @@ export interface CreditAssessmentRequest {
   notes?: string;
 }
 
+export interface CreditOverrideRequest {
+  order_id: string;
+  decision: 'APPROVED' | 'REJECTED';
+  override_reason: string;
+  approved_amount?: number;
+  notes?: string;
+}
+
+export interface CreditOverrideResponse {
+  success: boolean;
+  message?: string;
+  assessment_id?: string;
+  order_id?: string;
+}
+
 // Sales Orders interfaces
 export interface SalesOrderLine {
   line_number: number;
@@ -782,6 +797,7 @@ export const creditAPI = {
       body: JSON.stringify(body),
     });
   },
+
 };
 
 // Sales Orders API functions
@@ -825,9 +841,26 @@ export const salesOrdersAPI = {
     tenant_id: string,
     user_id: string
   ): Promise<any> {
-    return apiRequest(`/sales-orders/${order_id}/credit-decision`, {
+    // Validate UUID format
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(order_id)) {
+      throw new Error(`Invalid UUID format for order_id: ${order_id}`);
+    }
+
+    const params = new URLSearchParams({
+      tenant_id,
+      user_id,
+    });
+
+    console.log('Making credit decision API call:', {
+      url: `/sales-orders/${order_id}/credit-decision?${params.toString()}`,
       method: 'POST',
-      body: JSON.stringify({ ...decision_data, tenant_id, user_id }),
+      body: decision_data
+    });
+
+    return apiRequest(`/sales-orders/${order_id}/credit-decision?${params.toString()}`, {
+      method: 'POST',
+      body: JSON.stringify(decision_data),
     });
   },
 
@@ -1169,6 +1202,20 @@ export function useCreditManagement(tenant_id?: string) {
       return newAssessment;
     },
     reviewLimits: (customer_id?: string) => creditAPI.reviewLimits(tenant_id!, customer_id),
+    overrideCreditDecision: async (override_data: CreditOverrideRequest, user_id: string) => {
+      // Use the existing sales orders API for credit decision overrides
+      const decision_data: CreditDecisionRequest = {
+        decision: override_data.decision,
+        notes: `${override_data.override_reason}: ${override_data.notes || ''}`
+      };
+
+      return await salesOrdersAPI.makeCreditDecision(
+        override_data.order_id,
+        decision_data,
+        tenant_id!,
+        user_id
+      );
+    },
   };
 }
 

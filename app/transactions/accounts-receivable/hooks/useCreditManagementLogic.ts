@@ -6,7 +6,7 @@ import {
 } from "@/lib/ar-api"
 
 export const useCreditManagementLogic = () => {
-  const [creditView, setCreditView] = useState<"limits" | "assessments">("limits")
+  const [creditView, setCreditView] = useState<"limits" | "assessments" | "overrides">("limits")
   const [selectedLimit, setSelectedLimit] = useState<CreditLimit | null>(null)
   const [newCreditLimit, setNewCreditLimit] = useState<CreditLimitUpdate>({
     credit_limit: 0,

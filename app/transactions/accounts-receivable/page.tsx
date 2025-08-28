@@ -449,6 +449,7 @@ export default function AccountsReceivablePage() {
                       creditAssessments={creditAssessments}
                       creditLoading={creditLoading}
                       customers={customers}
+                      salesOrders={salesOrders}
                     />
                   </TabsContent>
 
