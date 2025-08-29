@@ -1,7 +1,9 @@
 "use client"
 
-import { useState } from "react"
-import { Calendar, Download, RefreshCw, MessageSquare } from "lucide-react"
+"use client"
+
+import { useState, useEffect } from "react"
+import { Calendar as CalendarIcon, Download, RefreshCw, MessageSquare } from "lucide-react" // Alias Calendar to CalendarIcon
 import { AppShell } from "@/components/layout/app-shell"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -9,101 +11,81 @@ import { Chart } from "@/components/ui/chart"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useToast } from "@/hooks/use-toast"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover" // Import Popover components
+import { Calendar } from "@/components/ui/calendar" // Import Calendar component
+import { format } from "date-fns" // Import format for date formatting
+import { cn } from "@/lib/utils" // Import cn for conditional classnames
 
 export default function ForecastingPage() {
   const { toast } = useToast()
   const [timeframe, setTimeframe] = useState("30-day")
   const [metric, setMetric] = useState("cash-flow")
   const [isLoading, setIsLoading] = useState(false)
+  const [forecastData, setForecastData] = useState<any[]>([])
+  const [selectedDate, setSelectedDate] = useState<Date | undefined>(new Date()) // New state for selected date
 
-  // Sample data for forecasts
-  const cashFlowData = {
-    "7-day": [
-      { date: "Jun 1", actual: 25000, forecast: 25000 },
-      { date: "Jun 2", actual: 22000, forecast: 23000 },
-      { date: "Jun 3", actual: 28000, forecast: 26000 },
-      { date: "Jun 4", actual: 24000, forecast: 25000 },
-      { date: "Jun 5", actual: 26000, forecast: 27000 },
-      { date: "Jun 6", actual: null, forecast: 29000 },
-      { date: "Jun 7", actual: null, forecast: 30000 },
-    ],
-    "30-day": [
-      { date: "Week 1", actual: 120000, forecast: 120000 },
-      { date: "Week 2", actual: 115000, forecast: 118000 },
-      { date: "Week 3", actual: 125000, forecast: 122000 },
-      { date: "Week 4", actual: null, forecast: 130000 },
-      { date: "Week 5", actual: null, forecast: 135000 },
-    ],
-    quarterly: [
-      { date: "Q1", actual: 1500000, forecast: 1500000 },
-      { date: "Q2", actual: 1650000, forecast: 1600000 },
-      { date: "Q3", actual: null, forecast: 1750000 },
-      { date: "Q4", actual: null, forecast: 1900000 },
-    ],
+  const TENANT_ID = "default_tenant_id"
+
+  // Helper to get current YYYY-MM period based on selectedDate
+  const getPeriod = (date: Date | undefined) => {
+    if (!date) {
+      return getCurrentPeriod(); // Fallback to current period if no date selected
+    }
+    const year = date.getFullYear()
+    const month = (date.getMonth() + 1).toString().padStart(2, '0')
+    return `${year}-${month}`
   }
 
-  const revenueData = {
-    "7-day": [
-      { date: "Jun 1", actual: 35000, forecast: 35000 },
-      { date: "Jun 2", actual: 32000, forecast: 33000 },
-      { date: "Jun 3", actual: 38000, forecast: 36000 },
-      { date: "Jun 4", actual: 34000, forecast: 35000 },
-      { date: "Jun 5", actual: 36000, forecast: 37000 },
-      { date: "Jun 6", actual: null, forecast: 39000 },
-      { date: "Jun 7", actual: null, forecast: 40000 },
-    ],
-    "30-day": [
-      { date: "Week 1", actual: 150000, forecast: 150000 },
-      { date: "Week 2", actual: 145000, forecast: 148000 },
-      { date: "Week 3", actual: 155000, forecast: 152000 },
-      { date: "Week 4", actual: null, forecast: 160000 },
-      { date: "Week 5", actual: null, forecast: 165000 },
-    ],
-    quarterly: [
-      { date: "Q1", actual: 1800000, forecast: 1800000 },
-      { date: "Q2", actual: 1950000, forecast: 1900000 },
-      { date: "Q3", actual: null, forecast: 2050000 },
-      { date: "Q4", actual: null, forecast: 2200000 },
-    ],
+  // Helper to get current YYYY-MM period (for initial load)
+  const getCurrentPeriod = () => {
+    const today = new Date()
+    const year = today.getFullYear()
+    const month = (today.getMonth() + 1).toString().padStart(2, '0')
+    return `${year}-${month}`
   }
 
-  const expenseData = {
-    "7-day": [
-      { date: "Jun 1", actual: 20000, forecast: 20000 },
-      { date: "Jun 2", actual: 18000, forecast: 19000 },
-      { date: "Jun 3", actual: 22000, forecast: 21000 },
-      { date: "Jun 4", actual: 19000, forecast: 20000 },
-      { date: "Jun 5", actual: 21000, forecast: 22000 },
-      { date: "Jun 6", actual: null, forecast: 23000 },
-      { date: "Jun 7", actual: null, forecast: 24000 },
-    ],
-    "30-day": [
-      { date: "Week 1", actual: 90000, forecast: 90000 },
-      { date: "Week 2", actual: 85000, forecast: 88000 },
-      { date: "Week 3", actual: 95000, forecast: 92000 },
-      { date: "Week 4", actual: null, forecast: 100000 },
-      { date: "Week 5", actual: null, forecast: 105000 },
-    ],
-    quarterly: [
-      { date: "Q1", actual: 1200000, forecast: 1200000 },
-      { date: "Q2", actual: 1300000, forecast: 1250000 },
-      { date: "Q3", actual: null, forecast: 1350000 },
-      { date: "Q4", actual: null, forecast: 1450000 },
-    ],
+  // Fetch forecast data from API
+  const fetchForecast = async (date?: Date) => {
+    setIsLoading(true)
+    const periodToFetch = getPeriod(date || selectedDate); // Use provided date or current selectedDate
+    try {
+      const response = await fetch(
+        `/api/forecast/latest?tenant_id=${TENANT_ID}&period=${periodToFetch}&metric_type=${metric}`
+      )
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+      const data = await response.json()
+      const transformedData = data.forecastPoints.map((fp: any) => ({
+        date: fp.date,
+        actual: fp.actual,
+        forecast: fp.value,
+      }))
+      setForecastData(transformedData)
+      toast({
+        title: "Forecast Updated",
+        description: "The forecast has been refreshed with the latest data.",
+      })
+    } catch (error) {
+      console.error("Failed to fetch forecast:", error)
+      toast({
+        title: "Error",
+        description: "Failed to fetch forecast data.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsLoading(false)
+    }
   }
+
+  // Initial fetch and refetch on metric/timeframe/selectedDate change
+  useEffect(() => {
+    fetchForecast()
+  }, [metric, timeframe, selectedDate]) // Re-fetch when metric, timeframe, or selectedDate changes
 
   // Get current data based on selected metric and timeframe
   const getCurrentData = () => {
-    switch (metric) {
-      case "cash-flow":
-        return cashFlowData[timeframe as keyof typeof cashFlowData]
-      case "revenue":
-        return revenueData[timeframe as keyof typeof revenueData]
-      case "expenses":
-        return expenseData[timeframe as keyof typeof expenseData]
-      default:
-        return cashFlowData[timeframe as keyof typeof cashFlowData]
-    }
+    return forecastData;
   }
 
   // Get chart title based on selected metric
@@ -122,23 +104,116 @@ export default function ForecastingPage() {
 
   // Handle refresh forecast
   const handleRefreshForecast = () => {
-    setIsLoading(true)
-    // Simulate API call
-    setTimeout(() => {
-      setIsLoading(false)
-      toast({
-        title: "Forecast Updated",
-        description: "The forecast has been refreshed with the latest data.",
-      })
-    }, 1500)
+    fetchForecast()
   }
 
-  // Handle run scenario
-  const handleRunScenario = () => {
+  // Handle export to CSV
+  const handleExport = () => {
+    if (forecastData.length === 0) {
+      toast({
+        title: "No Data",
+        description: "No forecast data to export.",
+      });
+      return;
+    }
+
+    const headers = ["Date", "Actual", "Forecast", "Variance"];
+    const csvRows = [headers.join(",")];
+
+    forecastData.forEach(item => {
+      const actual = item.actual !== null ? item.actual : "";
+      const variance = item.actual !== null ? (item.actual - item.forecast) : "Pending";
+      const row = [
+        item.date,
+        actual,
+        item.forecast,
+        variance
+      ].map(String).join(",");
+      csvRows.push(row);
+    });
+
+    const csvString = csvRows.join("\n");
+    const blob = new Blob([csvString], { type: "text/csv;charset=utf-8;" });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.setAttribute("download", `forecast_${getPeriod(selectedDate)}_${metric}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+
     toast({
-      title: "Scenario Analysis",
-      description: "Opening scenario analysis tool.",
-    })
+      title: "Export Successful",
+      description: "Forecast data exported to CSV.",
+    });
+  };
+
+  // Handle run scenario
+  const handleRunScenario = async (scenarioType: 'revenue_growth' | 'cost_reduction' | 'market_downturn') => {
+    setIsLoading(true)
+    try {
+      let revenue_growth_percent: number | undefined
+      let cost_reduction_percent: number | undefined
+
+      // Prepare the scenario request payload
+      const baseForecastRequest = {
+        period: getPeriod(selectedDate), // Use the selected period for the base forecast
+        tenantId: TENANT_ID,
+        metric_type: metric,
+        horizon_days: timeframe === "7-day" ? 7 : (timeframe === "30-day" ? 30 : 90),
+        historical_data: [],
+      }
+
+      switch (scenarioType) {
+        case 'revenue_growth':
+          revenue_growth_percent = 0.10
+          break
+        case 'cost_reduction':
+          cost_reduction_percent = 0.15
+          break
+        case 'market_downturn':
+          revenue_growth_percent = -0.20
+          break
+        default:
+          break
+      }
+
+      const response = await fetch('/api/forecast/scenario', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          base_forecast_request: baseForecastRequest,
+          revenue_growth_percent,
+          cost_reduction_percent,
+        }),
+      })
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+
+      const data = await response.json()
+      const transformedData = data.forecastPoints.map((fp: any) => ({
+        date: fp.date,
+        actual: null,
+        forecast: fp.value,
+      }))
+      setForecastData(transformedData)
+      toast({
+        title: "Scenario Applied",
+        description: `"${scenarioType.replace(/_/g, ' ').toUpperCase()}" scenario applied.`,
+      })
+    } catch (error) {
+      console.error("Failed to run scenario:", error)
+      toast({
+        title: "Error",
+        description: "Failed to run scenario analysis.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsLoading(false)
+    }
   }
 
   return (
@@ -150,11 +225,35 @@ export default function ForecastingPage() {
             <p className="text-muted-foreground">Financial planning, analysis, and forecasting tools</p>
           </div>
           <div className="mt-4 sm:mt-0 flex flex-col sm:flex-row gap-2">
-            <Button variant="outline">
-              <Calendar className="mr-2 h-4 w-4" />
-              Date Range
-            </Button>
-            <Button variant="outline">
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button
+                  variant={"outline"}
+                  className={cn(
+                    "w-[200px] justify-start text-left font-normal",
+                    !selectedDate && "text-muted-foreground"
+                  )}
+                >
+                  <CalendarIcon className="mr-2 h-4 w-4" />
+                  {selectedDate ? format(selectedDate, "MMM yyyy") : <span>Pick a date</span>}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0" align="start">
+                <Calendar
+                  mode="single"
+                  selected={selectedDate}
+                  onSelect={(date) => {
+                    setSelectedDate(date);
+                    fetchForecast(date || new Date()); // Trigger fetch with the newly selected date
+                  }}
+                  initialFocus
+                  captionLayout="dropdown" // Enable dropdowns for month and year
+                  fromYear={2020} // Adjust as needed
+                  toYear={2030} // Adjust as needed
+                />
+              </PopoverContent>
+            </Popover>
+            <Button variant="outline" onClick={handleExport}>
               <Download className="mr-2 h-4 w-4" />
               Export
             </Button>
@@ -209,7 +308,7 @@ export default function ForecastingPage() {
                 </Select>
               </div>
               <div className="flex items-end">
-                <Button className="w-full" variant="outline" onClick={handleRunScenario}>
+                <Button className="w-full" variant="outline" onClick={() => handleRunScenario('revenue_growth')}>
                   <MessageSquare className="mr-2 h-4 w-4" />
                   Run What-If Scenario
                 </Button>
@@ -317,7 +416,7 @@ export default function ForecastingPage() {
                 <p className="text-sm text-gray-500 mb-4">
                   Simulate the impact of a 10% increase in monthly revenue growth.
                 </p>
-                <Button variant="outline" size="sm" className="w-full">
+                <Button variant="outline" size="sm" className="w-full" onClick={() => handleRunScenario('revenue_growth')}>
                   Run Scenario
                 </Button>
               </div>
@@ -326,7 +425,7 @@ export default function ForecastingPage() {
                 <p className="text-sm text-gray-500 mb-4">
                   Analyze the effect of reducing operational expenses by 15%.
                 </p>
-                <Button variant="outline" size="sm" className="w-full">
+                <Button variant="outline" size="sm" className="w-full" onClick={() => handleRunScenario('cost_reduction')}>
                   Run Scenario
                 </Button>
               </div>
@@ -335,7 +434,7 @@ export default function ForecastingPage() {
                 <p className="text-sm text-gray-500 mb-4">
                   Stress test your finances with a 20% revenue decrease scenario.
                 </p>
-                <Button variant="outline" size="sm" className="w-full">
+                <Button variant="outline" size="sm" className="w-full" onClick={() => handleRunScenario('market_downturn')}>
                   Run Scenario
                 </Button>
               </div>
