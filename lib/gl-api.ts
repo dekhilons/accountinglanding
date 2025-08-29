@@ -13,7 +13,7 @@ interface JournalEntryResponseBackend {
   entry_date: string;
   description: string;
   reference: string;
-  source: string;
+  source: string; // e.g., "AP", "AR", "MANUAL", etc.
   status: string; // e.g., "DRAFT", "PENDING", "POSTED"
   is_recurring: boolean;
   is_auto_generated: boolean;
@@ -38,7 +38,7 @@ interface JournalEntryLineBackend {
   metadata_: any | null; // SQLAlchemy uses metadata_ for 'metadata' column
 }
 
-interface AccountResponseBackend {
+export interface AccountResponseBackend {
     id: string;
     tenant_id: string;
     name: string; // Changed from account_name to name to match backend
@@ -49,7 +49,7 @@ interface AccountResponseBackend {
     metadata_: any | null;
 }
 
-interface JournalTypeResponseBackend {
+export interface JournalTypeResponseBackend {
     id: string;
     tenant_id: string;
     name: string;
@@ -57,7 +57,7 @@ interface JournalTypeResponseBackend {
     description: string | null;
 }
 
-interface FiscalPeriodResponseBackend {
+export interface FiscalPeriodResponseBackend {
     id: string;
     tenant_id: string;
     fiscal_year_id: string;
@@ -65,6 +65,42 @@ interface FiscalPeriodResponseBackend {
     period_number: number;
     start_date: string;
     end_date: string;
+}
+
+export interface TrialBalanceItem {
+    account_id: string;
+    account_number: string;
+    account_name: string;
+    account_type: string;
+    debit_amount: number;
+    credit_amount: number;
+    net_amount: number;
+}
+
+export interface TrialBalanceResponse {
+    fiscal_period_id: string;
+    period_name: string;
+    start_date: string;
+    end_date: string;
+    items: TrialBalanceItem[];
+    total_debits: number;
+    total_credits: number;
+    tenant_id: string;
+    generated_at: string;
+}
+
+// Global simple cache object
+const cache: { [key: string]: any } = {};
+
+async function cachedFetch<T>(key: string, fetchFn: () => Promise<T>): Promise<T> {
+    if (cache[key]) {
+        console.log(`Cache hit for ${key}`);
+        return cache[key];
+    }
+    console.log(`Cache miss for ${key}, fetching...`);
+    const data = await fetchFn();
+    cache[key] = data;
+    return data;
 }
 
 // Maps to store account_id to account_name and vice-versa
@@ -80,20 +116,22 @@ let fiscalPeriodMap: Map<string, string> = new Map(); // date string to id
  */
 async function getAccountMap(): Promise<void> {
     try {
-        const response = await fetch(`${BASE_URL}/accounts?tenant_id=default`, { // Assuming 'default' tenant for now
-            headers: {
-                "X-API-Key": API_KEY,
-                "Content-Type": "application/json",
-            },
+        const accounts = await cachedFetch<AccountResponseBackend[]>("accounts", async () => {
+            const response = await fetch(`${BASE_URL}/accounts?tenant_id=default`, { // Assuming 'default' tenant for now
+                headers: {
+                    "X-API-Key": API_KEY,
+                    "Content-Type": "application/json",
+                },
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                console.error("Failed to fetch accounts:", errorText);
+                throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+            }
+            return response.json();
         });
 
-        if (!response.ok) {
-            const errorText = await response.text();
-            console.error("Failed to fetch accounts:", errorText);
-            throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
-        }
-
-        const accounts: AccountResponseBackend[] = await response.json();
         accountMap = new Map(); // Clear previous map
         accountNameToIdMap = new Map(); // Clear previous map
         accounts.forEach(account => {
@@ -111,20 +149,22 @@ async function getAccountMap(): Promise<void> {
  */
 async function getJournalTypesMap(): Promise<void> {
     try {
-        const response = await fetch(`${BASE_URL}/journal-types?tenant_id=default`, {
-            headers: {
-                "X-API-Key": API_KEY,
-                "Content-Type": "application/json",
-            },
+        const journalTypes = await cachedFetch<JournalTypeResponseBackend[]>("journal-types", async () => {
+            const response = await fetch(`${BASE_URL}/journal-types?tenant_id=default`, {
+                headers: {
+                    "X-API-Key": API_KEY,
+                    "Content-Type": "application/json",
+                },
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                console.error("Failed to fetch journal types:", errorText);
+                throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+            }
+            return response.json();
         });
 
-        if (!response.ok) {
-            const errorText = await response.text();
-            console.error("Failed to fetch journal types:", errorText);
-            throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
-        }
-
-        const journalTypes: JournalTypeResponseBackend[] = await response.json();
         journalTypeMap = new Map(); // Clear previous map
         journalTypes.forEach(journalType => {
             journalTypeMap.set(journalType.code, journalType.id);
@@ -141,26 +181,28 @@ async function getJournalTypesMap(): Promise<void> {
  * @returns The fiscal_period_id or null if not found.
  */
 async function getFiscalPeriodIdByDate(tenantId: string, dateString: string): Promise<string | null> {
-    const cacheKey = `${tenantId}-${dateString}`;
+    const cacheKey = `fiscal-period-${tenantId}-${dateString}`;
     if (fiscalPeriodMap.has(cacheKey)) {
         return fiscalPeriodMap.get(cacheKey) || null;
     }
 
     try {
-        const response = await fetch(`${BASE_URL}/fiscal-periods?tenant_id=${tenantId}`, {
-            headers: {
-                "X-API-Key": API_KEY,
-                "Content-Type": "application/json",
-            },
+        const fiscalPeriods = await cachedFetch<FiscalPeriodResponseBackend[]>(`fiscal-periods-${tenantId}`, async () => {
+            const response = await fetch(`${BASE_URL}/fiscal-periods?tenant_id=${tenantId}`, {
+                headers: {
+                    "X-API-Key": API_KEY,
+                    "Content-Type": "application/json",
+                },
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                console.error("Failed to fetch fiscal periods:", errorText);
+                throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+            }
+            return response.json();
         });
-
-        if (!response.ok) {
-            const errorText = await response.text();
-            console.error("Failed to fetch fiscal periods:", errorText);
-            throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
-        }
-
-        const fiscalPeriods: FiscalPeriodResponseBackend[] = await response.json();
+        
         const entryDate = new Date(dateString);
 
         for (const period of fiscalPeriods) {
@@ -175,9 +217,150 @@ async function getFiscalPeriodIdByDate(tenantId: string, dateString: string): Pr
         return null;
     } catch (error) {
         console.error("Error fetching fiscal period by date:", error);
+    return null;
+  }
+}
+
+/**
+ * Creates a new account.
+ * @param tenantId The ID of the tenant.
+ * @param accountData The data for the new account.
+ * @returns A promise that resolves to the created AccountResponseBackend object or null on error.
+ */
+export async function createAccount(
+  tenantId: string,
+  accountData: {
+    account_number: string;
+    name: string;
+    description?: string;
+    account_type_id: string;
+    is_active?: boolean;
+    is_control_account?: boolean;
+    metadata?: Record<string, any>;
+  }
+): Promise<AccountResponseBackend | null> {
+  const payload = {
+    tenant_id: tenantId,
+    ...accountData,
+  };
+
+  try {
+    const response = await fetch(`${BASE_URL}/accounts`, {
+      method: "POST",
+      headers: {
+        "X-API-Key": API_KEY,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error("Failed to create account:", errorText);
+      return null;
+    }
+
+    const createdAccount: AccountResponseBackend = await response.json();
+    // Invalidate accounts cache so next fetch gets new data
+    delete cache[`accounts-${tenantId}`];
+    return createdAccount;
+  } catch (error) {
+    console.error("Error creating account:", error);
+    return null;
+  }
+}
+
+/**
+ * Fetches all accounts for a tenant.
+ * @param tenantId The ID of the tenant.
+ * @returns A promise that resolves to an array of AccountResponseBackend objects or null on error.
+ */
+export async function getAccounts(tenantId: string): Promise<AccountResponseBackend[] | null> {
+    try {
+        const accounts = await cachedFetch<AccountResponseBackend[]>(`accounts-${tenantId}`, async () => {
+            const response = await fetch(`${BASE_URL}/accounts?tenant_id=${tenantId}`, {
+                headers: {
+                    "X-API-Key": API_KEY,
+                    "Content-Type": "application/json",
+                },
+            });
+            if (!response.ok) {
+                const errorText = await response.text();
+                console.error(`Failed to fetch accounts for tenant ${tenantId}:`, errorText);
+                throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+            }
+            return response.json();
+        });
+        return accounts;
+    } catch (error) {
+        console.error("Error in getAccounts:", error);
         return null;
     }
 }
+
+/**
+ * Fetches all journal types for a tenant.
+ * @param tenantId The ID of the tenant.
+ * @returns A promise that resolves to an array of JournalTypeResponseBackend objects or null on error.
+ */
+export async function getJournalTypes(tenantId: string): Promise<JournalTypeResponseBackend[] | null> {
+    try {
+        const journalTypes = await cachedFetch<JournalTypeResponseBackend[]>(`journal-types-${tenantId}`, async () => {
+            const response = await fetch(`${BASE_URL}/journal-types?tenant_id=${tenantId}`, {
+                headers: {
+                    "X-API-Key": API_KEY,
+                    "Content-Type": "application/json",
+                },
+            });
+            if (!response.ok) {
+                const errorText = await response.text();
+                console.error(`Failed to fetch journal types for tenant ${tenantId}:`, errorText);
+                throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+            }
+            return response.json();
+        });
+        return journalTypes;
+    } catch (error) {
+        console.error("Error in getJournalTypes:", error);
+        return null;
+    }
+}
+
+/**
+ * Fetches fiscal periods for a tenant, optionally filtered by fiscal year.
+ * @param tenantId The ID of the tenant.
+ * @param fiscalYearId Optional fiscal year ID to filter periods.
+ * @returns A promise that resolves to an array of FiscalPeriodResponseBackend objects or null on error.
+ */
+export async function getFiscalPeriods(tenantId: string, fiscalYearId?: string): Promise<FiscalPeriodResponseBackend[] | null> {
+    const queryParams = new URLSearchParams({ tenant_id: tenantId });
+    if (fiscalYearId) {
+        queryParams.append("fiscal_year_id", fiscalYearId);
+    }
+    const cacheKey = `fiscal-periods-${tenantId}-${fiscalYearId || 'all'}`;
+
+    try {
+        const fiscalPeriods = await cachedFetch<FiscalPeriodResponseBackend[]>(cacheKey, async () => {
+            const response = await fetch(`${BASE_URL}/fiscal-periods?${queryParams.toString()}`, {
+                headers: {
+                    "X-API-Key": API_KEY,
+                    "Content-Type": "application/json",
+                },
+            });
+            if (!response.ok) {
+                const errorText = await response.text();
+                console.error(`Failed to fetch fiscal periods for tenant ${tenantId}:`, errorText);
+                throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+            }
+            return response.json();
+        });
+        return fiscalPeriods;
+    } catch (error) {
+        console.error("Error in getFiscalPeriods:", error);
+        return null;
+    }
+}
+
 
 /**
  * Fetches journal entries from the General Ledger service.
@@ -230,7 +413,8 @@ export async function getJournalEntries(
     if (!response.ok) {
       const errorText = await response.text();
       console.error("Failed to fetch journal entries:", errorText);
-      throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+      // Instead of throwing, return an empty array and let the component handle the error toast
+      return [];
     }
 
     const backendEntries: JournalEntryResponseBackend[] = await response.json();
@@ -263,9 +447,12 @@ export async function getJournalEntries(
     return transformedEntries;
   } catch (error) {
     console.error("Error fetching journal entries:", error);
+    // Return empty array on error
     return [];
   }
 }
+
+import type { NewEntryForm } from "./types"; // Import NewEntryForm
 
 /**
  * Creates a new journal entry in the General Ledger service.
@@ -275,32 +462,27 @@ export async function getJournalEntries(
  */
 export async function createJournalEntry(
   tenantId: string,
-  journalEntryData: Omit<JournalEntry, "id" | "status">
+  journalEntryData: NewEntryForm // Use NewEntryForm type
 ): Promise<JournalEntryResponseBackend | null> {
-  // Ensure maps are populated
-  if (accountNameToIdMap.size === 0) {
-    await getAccountMap();
-  }
-  if (journalTypeMap.size === 0) {
-    await getJournalTypesMap();
-  }
+  // No need to ensure maps are populated here, as IDs are directly provided
+  // No need to resolve account_id from account name, it's already an ID
+  const accountId = journalEntryData.account;
+  const journalTypeId = journalEntryData.journal_type_id;
 
-  // Resolve account_id from account name
-  const accountId = accountNameToIdMap.get(journalEntryData.account);
   if (!accountId) {
-    throw new Error(`Account with name '${journalEntryData.account}' not found.`);
+    console.error(`Account ID is missing.`);
+    return null;
   }
-
-  // Resolve journal_type_id (using a default for now, can be passed from frontend later)
-  const journalTypeId = journalTypeMap.get("GJ"); // Assuming "GJ" (General Journal) as default
   if (!journalTypeId) {
-    throw new Error(`Journal type with code 'GJ' not found.`);
+    console.error(`Journal type ID is missing.`);
+    return null;
   }
 
   // Resolve fiscal_period_id from entry date
   const fiscalPeriodId = await getFiscalPeriodIdByDate(tenantId, journalEntryData.date);
   if (!fiscalPeriodId) {
-    throw new Error(`Fiscal period not found for date '${journalEntryData.date}'.`);
+    console.error(`Fiscal period not found for date '${journalEntryData.date}'.`);
+    return null; // Return null for component to handle error
   }
 
   const payload = {
@@ -318,7 +500,7 @@ export async function createJournalEntry(
     lines: [
       {
         tenant_id: tenantId,
-        account_id: accountId, // Needs to be resolved from journalEntryData.account
+        account_id: accountId, // accountId is directly from journalEntryData.account
         line_number: 1,
         description: journalEntryData.description,
         debit_amount: journalEntryData.debit,
@@ -343,7 +525,7 @@ export async function createJournalEntry(
     if (!response.ok) {
       const errorText = await response.text();
       console.error("Failed to create journal entry:", errorText);
-      throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+      return null; // Return null for component to handle error
     }
 
     const createdEntry: JournalEntryResponseBackend = await response.json();
@@ -352,4 +534,62 @@ export async function createJournalEntry(
     console.error("Error creating journal entry:", error);
     return null;
   }
+}
+
+/**
+ * Posts a journal entry.
+ * @param id The ID of the journal entry to post.
+ * @returns A promise that resolves to an object indicating success and status, or null on error.
+ */
+export async function postJournalEntry(id: string): Promise<{ success: boolean; status: string } | null> {
+    try {
+        const response = await fetch(`${BASE_URL}/journal-entries/${id}/post`, {
+            method: "POST",
+            headers: {
+                "X-API-Key": API_KEY,
+                "Content-Type": "application/json",
+            },
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error(`Failed to post journal entry ${id}:`, errorText);
+            return null; // Return null for component to handle error
+        }
+
+        const result: { success: boolean; status: string } = await response.json();
+        return result;
+    } catch (error) {
+        console.error(`Error posting journal entry ${id}:`, error);
+        return null;
+    }
+}
+
+/**
+ * Generates a trial balance report.
+ * @param tenantId The ID of the tenant.
+ * @param fiscalPeriodId The ID of the fiscal period.
+ * @returns A promise that resolves to a TrialBalanceResponse object or null on error.
+ */
+export async function generateTrialBalance(tenantId: string, fiscalPeriodId: string): Promise<TrialBalanceResponse | null> {
+    try {
+        const response = await fetch(`${BASE_URL}/reports/trial-balance?tenant_id=${tenantId}&fiscal_period_id=${fiscalPeriodId}`, {
+            headers: {
+                "X-API-Key": API_KEY,
+                "Content-Type": "application/json",
+            },
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error(`Failed to generate trial balance for tenant ${tenantId}, period ${fiscalPeriodId}:`, errorText);
+            return null; // Return null for component to handle error
+        }
+
+        const trialBalance: TrialBalanceResponse = await response.json();
+        return trialBalance;
+    } catch (error) {
+        console.error(`Error generating trial balance for tenant ${tenantId}, period ${fiscalPeriodId}:`, error);
+        return null;
+    }
 }

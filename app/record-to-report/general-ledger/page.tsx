@@ -13,8 +13,21 @@ import { ModalDialog } from "@/components/ui/modal-dialog"
 import { ApprovalCard } from "@/components/ui/approval-card"
 import { useToast } from "@/hooks/use-toast"
 
-import type { JournalEntry } from "@/lib/types";
-import { getJournalEntries, createJournalEntry } from "@/lib/gl-api"; // Import the API function
+import type { JournalEntry, NewEntryForm } from "@/lib/types";
+import {
+  getJournalEntries,
+  createJournalEntry,
+  getAccounts,
+  getJournalTypes,
+  getFiscalPeriods,
+  postJournalEntry,
+  generateTrialBalance,
+  createAccount,
+  AccountResponseBackend,
+  JournalTypeResponseBackend,
+  FiscalPeriodResponseBackend,
+  TrialBalanceResponse,
+} from "@/lib/gl-api"; // Import the API functions and types
 
 export default function GeneralLedgerPage() {
   const { toast } = useToast()
@@ -23,17 +36,22 @@ export default function GeneralLedgerPage() {
   const [isFilterModalOpen, setIsFilterModalOpen] = useState(false)
   const [isExportModalOpen, setIsExportModalOpen] = useState(false)
   const [selectedEntry, setSelectedEntry] = useState<JournalEntry | null>(null)
-  const [journalEntries, setJournalEntries] = useState<JournalEntry[]>([]) // Initialize as empty array
-  const [isLoading, setIsLoading] = useState(true); // Loading state
-  const [error, setError] = useState<string | null>(null); // Error state
-  const [newEntry, setNewEntry] = useState<Omit<JournalEntry, "id" | "status">>({
+  const [journalEntries, setJournalEntries] = useState<JournalEntry[]>([])
+  const [accounts, setAccounts] = useState<AccountResponseBackend[]>([])
+  const [journalTypes, setJournalTypes] = useState<JournalTypeResponseBackend[]>([])
+  const [fiscalPeriods, setFiscalPeriods] = useState<FiscalPeriodResponseBackend[]>([])
+  const [trialBalanceData, setTrialBalanceData] = useState<TrialBalanceResponse | null>(null)
+  const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [newEntry, setNewEntry] = useState<NewEntryForm>({
     date: "",
     description: "",
     debit: 0,
     credit: 0,
-    account: "",
+    account: "", // This will now store the account ID
+    journal_type_id: "", // New field to store journal type ID
     reference: "",
-    is_anomaly: false, // Initialize as false for new entries
+    // is_anomaly is not part of NewEntryForm as it's set by the backend
   })
   const [filterCriteria, setFilterCriteria] = useState({
     startDate: "",
@@ -41,37 +59,66 @@ export default function GeneralLedgerPage() {
     account: "",
     status: "",
   })
+  const [isLedgerMaintenanceOpen, setIsLedgerMaintenanceOpen] = useState(false)
+  const [isNewAccountModalOpen, setIsNewAccountModalOpen] = useState(false)
+  const [newAccount, setNewAccount] = useState({
+    account_number: "",
+    name: "",
+    description: "",
+    account_type_id: "",
+  })
 
-  // Sample data for trial balance chart - this will eventually come from an API
-  const trialBalanceData = [
-    { category: "Assets", debit: 250000, credit: 0 },
-    { category: "Liabilities", debit: 0, credit: 120000 },
-    { category: "Equity", debit: 0, credit: 80000 },
-    { category: "Revenue", debit: 0, credit: 175000 },
-    { category: "Expenses", debit: 125000, credit: 0 },
-  ]
-
-  // Fetch journal entries on component mount and when filter criteria change
+  // Fetch all necessary data on component mount
   useEffect(() => {
-    const fetchEntries = async () => {
-      setIsLoading(true);
-      setError(null);
+    const fetchData = async () => {
+      setIsLoading(true)
+      setError(null)
+      const tenantId = "default" // Placeholder: Replace with actual tenant ID
+
       try {
-        // Assuming a tenantId is available, e.g., from user context or a default
-        const tenantId = "default"; // Placeholder: Replace with actual tenant ID
-        const fetchedEntries = await getJournalEntries(tenantId, {
-          startDate: filterCriteria.startDate,
-          endDate: filterCriteria.endDate,
-          account: filterCriteria.account,
-          status: filterCriteria.status as JournalEntry["status"],
-        });
-        setJournalEntries(fetchedEntries);
+        const [
+          fetchedAccounts,
+          fetchedJournalTypes,
+          fetchedFiscalPeriods,
+          fetchedJournalEntries,
+        ] = await Promise.all([
+          getAccounts(tenantId),
+          getJournalTypes(tenantId),
+          getFiscalPeriods(tenantId),
+          getJournalEntries(tenantId, {
+            startDate: filterCriteria.startDate,
+            endDate: filterCriteria.endDate,
+            account: filterCriteria.account,
+            status: filterCriteria.status as JournalEntry["status"],
+          }),
+        ])
+
+        if (fetchedAccounts) setAccounts(fetchedAccounts)
+        if (fetchedJournalTypes) setJournalTypes(fetchedJournalTypes)
+        if (fetchedFiscalPeriods) setFiscalPeriods(fetchedFiscalPeriods)
+        if (fetchedJournalEntries) setJournalEntries(fetchedJournalEntries)
+
+        // Fetch Trial Balance for the latest fiscal period, if available
+        if (fetchedFiscalPeriods && fetchedFiscalPeriods.length > 0) {
+          // Sort periods by end_date descending to get the latest
+          const latestPeriod = fetchedFiscalPeriods.sort((a, b) => new Date(b.end_date).getTime() - new Date(a.end_date).getTime())[0];
+          const fetchedTrialBalance = await generateTrialBalance(tenantId, latestPeriod.id);
+          if (fetchedTrialBalance) {
+            setTrialBalanceData(fetchedTrialBalance);
+          } else {
+            toast({
+              title: "Warning",
+              description: "Failed to load trial balance data.",
+              variant: "default",
+            });
+          }
+        }
       } catch (err) {
-        setError("Failed to fetch journal entries.");
+        setError("Failed to fetch data.");
         console.error("Fetch error:", err);
         toast({
           title: "Error",
-          description: "Failed to load journal entries.",
+          description: "Failed to load general ledger data.",
           variant: "destructive",
         });
       } finally {
@@ -79,8 +126,8 @@ export default function GeneralLedgerPage() {
       }
     };
 
-    fetchEntries();
-  }, [filterCriteria.startDate, filterCriteria.endDate, filterCriteria.account, filterCriteria.status, toast]); // Re-fetch when filter criteria change
+    fetchData();
+  }, [filterCriteria.startDate, filterCriteria.endDate, filterCriteria.account, filterCriteria.status, toast]); // Re-fetch when filter criteria change or on mount
 
   // Handle row click to show details
   const handleRowClick = (entry: JournalEntry) => {
@@ -90,30 +137,62 @@ export default function GeneralLedgerPage() {
 
   // Handle approval actions
   const handleApprove = async (id: string) => {
-    // TODO: Implement actual API call to post the journal entry
-    // For now, just update local state and show toast
+    const tenantId = "default"; // Placeholder: Replace with actual tenant ID
     try {
-      // Assuming a postJournalEntry API function exists
-      // await postJournalEntry(id);
-      setJournalEntries((prevEntries) =>
-        prevEntries.map((entry) =>
-          entry.id === id ? { ...entry, status: "approved" } : entry
-        )
-      )
-      toast({
-        title: "Anomaly Approved",
-        description: `Journal entry ${id} has been approved and posted.`,
-      })
-      setIsDetailsModalOpen(false)
+      const result = await postJournalEntry(id);
+      if (result && result.success) {
+        toast({
+          title: "Anomaly Approved",
+          description: `Journal entry ${id} has been approved and posted.`,
+        });
+        setJournalEntries((prevEntries) =>
+          prevEntries.map((entry) =>
+            entry.id === id ? { ...entry, status: "approved" } : entry
+          )
+        );
+        setIsDetailsModalOpen(false);
+        // Re-fetch all data to ensure balances and lists are updated
+        const [
+          fetchedAccounts,
+          fetchedJournalTypes,
+          fetchedFiscalPeriods,
+          fetchedJournalEntries,
+        ] = await Promise.all([
+          getAccounts(tenantId),
+          getJournalTypes(tenantId),
+          getFiscalPeriods(tenantId),
+          getJournalEntries(tenantId, {
+            startDate: filterCriteria.startDate,
+            endDate: filterCriteria.endDate,
+            account: filterCriteria.account,
+            status: filterCriteria.status as JournalEntry["status"],
+          }),
+        ]);
+        if (fetchedAccounts) setAccounts(fetchedAccounts);
+        if (fetchedJournalTypes) setJournalTypes(fetchedJournalTypes);
+        if (fetchedFiscalPeriods) setFiscalPeriods(fetchedFiscalPeriods);
+        if (fetchedJournalEntries) setJournalEntries(fetchedJournalEntries);
+        
+        if (fetchedFiscalPeriods && fetchedFiscalPeriods.length > 0) {
+          const latestPeriod = fetchedFiscalPeriods.sort((a, b) => new Date(b.end_date).getTime() - new Date(a.end_date).getTime())[0];
+          const fetchedTrialBalance = await generateTrialBalance(tenantId, latestPeriod.id);
+          if (fetchedTrialBalance) {
+            setTrialBalanceData(fetchedTrialBalance);
+          }
+        }
+
+      } else {
+        throw new Error(result?.status || "Unknown error during posting.");
+      }
     } catch (error) {
       toast({
         title: "Error",
-        description: `Failed to approve journal entry ${id}.`,
+        description: `Failed to approve journal entry ${id}: ${error instanceof Error ? error.message : "Unknown error"}`,
         variant: "destructive",
-      })
+      });
       console.error("Approval error:", error);
     }
-  }
+  };
 
   const handleReject = (id: string, reason?: string) => {
     // For rejection, we might not change the status from 'anomaly' unless there's a 'rejected' status.
@@ -133,6 +212,53 @@ export default function GeneralLedgerPage() {
     })
     // TODO: Implement actual edit functionality here, e.g., navigate to an edit form or open an editable modal
   }
+
+  const handleSubmitNewAccount = async () => {
+    if (!newAccount.account_number || !newAccount.name || !newAccount.account_type_id) {
+      toast({
+        title: "Error",
+        description: "Please fill all required fields for the new account.",
+        variant: "destructive",
+      });
+      return;
+    }
+    const tenantId = "default"; // Placeholder
+
+    try {
+      const createdAccount = await createAccount(tenantId, {
+        account_number: newAccount.account_number,
+        name: newAccount.name,
+        description: newAccount.description,
+        account_type_id: newAccount.account_type_id,
+      });
+
+      if (createdAccount) {
+        toast({
+          title: "Account Created",
+          description: `Account ${createdAccount.name} (${createdAccount.account_number}) created successfully.`,
+        });
+        setIsNewAccountModalOpen(false);
+        setNewAccount({
+          account_number: "",
+          name: "",
+          description: "",
+          account_type_id: "",
+        });
+        // Re-fetch accounts to update the list
+        const fetchedAccounts = await getAccounts(tenantId);
+        if (fetchedAccounts) setAccounts(fetchedAccounts);
+      } else {
+        throw new Error("Failed to create account on backend.");
+      }
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: `Failed to create account: ${error instanceof Error ? error.message : "Unknown error"}`,
+        variant: "destructive",
+      });
+      console.error("Error creating account:", error);
+    }
+  };
 
   const handleNewJournalEntry = () => {
     toast({
@@ -204,12 +330,14 @@ export default function GeneralLedgerPage() {
       return
     }
 
-    // TODO: Resolve account_id, journal_type_id, fiscal_period_id
-    // For now, these are placeholders in createJournalEntry in gl-api.ts
     const tenantId = "default"; // Placeholder: Replace with actual tenant ID
 
     try {
-      const createdEntry = await createJournalEntry(tenantId, newEntry);
+      const createdEntry = await createJournalEntry(tenantId, {
+        ...newEntry,
+        account: newEntry.account, // account is now the ID
+        journal_type_id: newEntry.journal_type_id, // journal_type_id is now included
+      });
 
       if (createdEntry) {
         toast({
@@ -223,8 +351,9 @@ export default function GeneralLedgerPage() {
           debit: 0,
           credit: 0,
           account: "",
+          journal_type_id: "",
           reference: "",
-          is_anomaly: false,
+          // is_anomaly is not part of NewEntryForm as it's set by the backend
         });
         // Re-fetch journal entries to update the list
         const fetchedEntries = await getJournalEntries(tenantId, filterCriteria as any); // Re-fetch all entries
@@ -407,8 +536,41 @@ export default function GeneralLedgerPage() {
               Export
             </Button>
             <Button className="bg-teal-600 hover:bg-teal-700" onClick={handleNewJournalEntry}>New Journal Entry</Button>
+            <Button variant="outline" onClick={() => setIsLedgerMaintenanceOpen(!isLedgerMaintenanceOpen)}>
+              {isLedgerMaintenanceOpen ? "Hide Ledger Maintenance" : "Manage Accounts"}
+            </Button>
           </div>
         </div>
+
+        {/* Ledger Maintenance Section */}
+        {isLedgerMaintenanceOpen && (
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <div>
+                <CardTitle>Ledger Maintenance</CardTitle>
+                <CardDescription>Manage your chart of accounts</CardDescription>
+              </div>
+              <Button onClick={() => setIsNewAccountModalOpen(true)}>Create Account</Button>
+            </CardHeader>
+            <CardContent>
+              <DataTable
+                columns={[
+                  { accessorKey: "account_number", header: "Account Number" },
+                  { accessorKey: "name", header: "Account Name" },
+                  { accessorKey: "balance", header: "Balance", cell: ({ row }) => {
+                      const amount = Number.parseFloat(row.getValue("balance"));
+                      return new Intl.NumberFormat("en-US", {
+                          style: "currency",
+                          currency: "USD",
+                      }).format(amount);
+                  }},
+                ]}
+                data={accounts}
+                onRowClick={() => { /* TODO: Implement account details modal */ }}
+              />
+            </CardContent>
+          </Card>
+        )}
 
         {/* Trial Balance Chart */}
         <Card>
@@ -417,17 +579,27 @@ export default function GeneralLedgerPage() {
             <CardDescription>Current account balances by category</CardDescription>
           </CardHeader>
           <CardContent>
-            <Chart
-              title=""
-              data={trialBalanceData}
-              type="bar"
-              xAxisKey="category"
-              series={[
-                { name: "Debit", key: "debit", color: "#10b981" },
-                { name: "Credit", key: "credit", color: "#6366f1" },
-              ]}
-              height={300}
-            />
+            {trialBalanceData && trialBalanceData.items.length > 0 ? (
+              <Chart
+                title=""
+                data={trialBalanceData.items.map(item => ({
+                  category: item.account_name,
+                  debit: item.debit_amount,
+                  credit: item.credit_amount,
+                }))}
+                type="bar"
+                xAxisKey="category"
+                series={[
+                  { name: "Debit", key: "debit", color: "#10b981" },
+                  { name: "Credit", key: "credit", color: "#6366f1" },
+                ]}
+                height={300}
+              />
+            ) : (
+              <div className="text-center py-10">
+                <p className="text-muted-foreground">No trial balance data available for the selected period.</p>
+              </div>
+            )}
           </CardContent>
         </Card>
 
@@ -463,14 +635,38 @@ export default function GeneralLedgerPage() {
         {selectedEntry && (
           <div className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <h3 className="text-sm font-medium text-gray-500">Date</h3>
-                <p className="mt-1">{new Date(selectedEntry.date).toLocaleDateString()}</p>
-              </div>
-              <div>
-                <h3 className="text-sm font-medium text-gray-500">Reference</h3>
-                <p className="mt-1">{selectedEntry.reference}</p>
-              </div>
+          <div>
+            <label htmlFor="journalType" className="block text-sm font-medium text-gray-700">Journal Type</label>
+            <select
+              id="journalType"
+              value={newEntry.journal_type_id}
+              onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setNewEntry({ ...newEntry, journal_type_id: e.target.value })}
+              className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-teal-500 focus:border-teal-500 sm:text-sm rounded-md"
+            >
+              <option value="">Select a journal type</option>
+              {journalTypes.map((type) => (
+                <option key={type.id} value={type.id}>
+                  {type.name} ({type.code})
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label htmlFor="account" className="block text-sm font-medium text-gray-700">Account</label>
+            <select
+              id="account"
+              value={newEntry.account}
+              onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setNewEntry({ ...newEntry, account: e.target.value })}
+              className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-teal-500 focus:border-teal-500 sm:text-sm rounded-md"
+            >
+              <option value="">Select an account</option>
+              {accounts.map((account) => (
+                <option key={account.id} value={account.id}>
+                  {account.account_number} - {account.name}
+                </option>
+              ))}
+            </select>
+          </div>
               <div className="md:col-span-2">
                 <h3 className="text-sm font-medium text-gray-500">Description</h3>
                 <p className="mt-1">{selectedEntry.description}</p>
@@ -558,12 +754,36 @@ export default function GeneralLedgerPage() {
             />
           </div>
           <div>
+            <label htmlFor="journalType" className="block text-sm font-medium text-gray-700">Journal Type</label>
+            <select
+              id="journalType"
+              value={newEntry.journal_type_id} // Assuming newEntry will have a journal_type_id
+              onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setNewEntry({ ...newEntry, journal_type_id: e.target.value })}
+              className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-teal-500 focus:border-teal-500 sm:text-sm rounded-md"
+            >
+              <option value="">Select a journal type</option>
+              {journalTypes.map((type) => (
+                <option key={type.id} value={type.id}>
+                  {type.name} ({type.code})
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
             <label htmlFor="account" className="block text-sm font-medium text-gray-700">Account</label>
-            <Input
+            <select
               id="account"
-              value={newEntry.account}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewEntry({ ...newEntry, account: e.target.value })}
-            />
+              value={newEntry.account} // newEntry.account will now store account ID
+              onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setNewEntry({ ...newEntry, account: e.target.value })}
+              className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-teal-500 focus:border-teal-500 sm:text-sm rounded-md"
+            >
+              <option value="">Select an account</option>
+              {accounts.map((account) => (
+                <option key={account.id} value={account.id}>
+                  {account.account_number} - {account.name}
+                </option>
+              ))}
+            </select>
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div>
@@ -668,6 +888,65 @@ export default function GeneralLedgerPage() {
           <p>Select the desired export format:</p>
           <div className="flex justify-around">
             <Button onClick={() => handleExportData("csv")}>Export as CSV</Button>
+          </div>
+        </div>
+      </ModalDialog>
+
+      {/* New Account Modal */}
+      <ModalDialog
+        title="Create New Account"
+        isOpen={isNewAccountModalOpen}
+        onClose={() => setIsNewAccountModalOpen(false)}
+        size="md"
+      >
+        <div className="space-y-4">
+          <div>
+            <label htmlFor="accountNumber" className="block text-sm font-medium text-gray-700">Account Number</label>
+            <Input
+              id="accountNumber"
+              value={newAccount.account_number}
+              onChange={(e) => setNewAccount({ ...newAccount, account_number: e.target.value })}
+            />
+          </div>
+          <div>
+            <label htmlFor="accountName" className="block text-sm font-medium text-gray-700">Account Name</label>
+            <Input
+              id="accountName"
+              value={newAccount.name}
+              onChange={(e) => setNewAccount({ ...newAccount, name: e.target.value })}
+            />
+          </div>
+          <div>
+            <label htmlFor="accountDescription" className="block text-sm font-medium text-gray-700">Description</label>
+            <Input
+              id="accountDescription"
+              value={newAccount.description}
+              onChange={(e) => setNewAccount({ ...newAccount, description: e.target.value })}
+            />
+          </div>
+          <div>
+            <label htmlFor="accountType" className="block text-sm font-medium text-gray-700">Account Type</label>
+            <select
+              id="accountType"
+              value={newAccount.account_type_id}
+              onChange={(e) => setNewAccount({ ...newAccount, account_type_id: e.target.value })}
+              className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-teal-500 focus:border-teal-500 sm:text-sm rounded-md"
+            >
+              <option value="">Select an account type</option>
+              {journalTypes.map((type) => (
+                <option key={type.id} value={type.id}>
+                  {type.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="flex justify-end pt-4">
+            <Button variant="outline" onClick={() => setIsNewAccountModalOpen(false)} className="mr-2">
+              Cancel
+            </Button>
+            <Button onClick={handleSubmitNewAccount} className="bg-teal-600 hover:bg-teal-700">
+              Create Account
+            </Button>
           </div>
         </div>
       </ModalDialog>

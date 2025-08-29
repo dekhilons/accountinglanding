@@ -2,6 +2,7 @@ import type React from "react"
 import { ThemeProvider } from "@/components/theme-provider"
 import { Toaster } from "@/components/ui/toaster"
 import "./globals.css"
+import "react-day-picker/dist/style.css" // Import react-day-picker styles
 
 export default function RootLayout({
   children,
