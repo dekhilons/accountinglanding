@@ -119,7 +119,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           icon: <ChevronRight className="h-4 w-4" />,
         },
         {
-          title: "Bank Reconciliation",
+          title: "Transactions Reconciliation",
           href: "/transactions/bank-reconciliation",
           icon: <ChevronRight className="h-4 w-4" />,
         },
@@ -239,7 +239,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           if (path[2] === "accounts-payable") return "Accounts Payable"
           if (path[2] === "accounts-receivable") return "Accounts Receivable"
           if (path[2] === "invoices") return "Invoices (AP & AR)"
-          if (path[2] === "bank-reconciliation") return "Bank Reconciliation"
+          if (path[2] === "bank-reconciliation") return "Transactions Reconciliation"
           if (path[2] === "manual-upload") return "Manual Upload"
         }
         return "Transactions"
