@@ -236,14 +236,40 @@ export default function MonthEndClosePage() {
     loadInitialData()
   }, [])
 
+  // Debug logging for modal state
+  useEffect(() => {
+    console.log('Modal state changed - isOpen:', isSelectPeriodModalOpen, 'closePeriods:', closePeriods.length)
+  }, [isSelectPeriodModalOpen, closePeriods])
+
   const loadInitialData = async () => {
     try {
       setLoading(true)
       setError(null)
 
       // Load fiscal periods
-      const periods = await apiService.getFiscalPeriods()
-      setFiscalPeriods(periods)
+      try {
+        const periods = await apiService.getFiscalPeriods()
+        console.log('Loaded fiscal periods:', periods)
+        setFiscalPeriods(periods)
+
+        // Create close periods from fiscal periods
+        const closePeriodsData = periods.map((period: any) => ({
+          id: period.id,
+          name: period.name,
+          startDate: period.start_date,
+          endDate: period.end_date,
+          status: (period.is_closed ? "closed" : "open") as "open" | "in-progress" | "closed",
+          progress: period.is_closed ? 100 : 0,
+          fiscalPeriodId: period.id,
+          steps: createDefaultCloseSteps()
+        }))
+        console.log('Created close periods:', closePeriodsData)
+        setClosePeriods(closePeriodsData)
+      } catch (error) {
+        console.error('Failed to load fiscal periods:', error)
+        setError('Failed to load fiscal periods. Please check the GL service.')
+        return
+      }
 
       // Load GL accounts
       const accounts = await apiService.getGLAccounts()
@@ -272,6 +298,63 @@ export default function MonthEndClosePage() {
       console.error('Failed to load unreconciled transactions:', err)
     }
   }
+
+  const createDefaultCloseSteps = (): CloseStep[] => [
+    {
+      id: "step-1",
+      name: "Bank Reconciliation",
+      status: "pending",
+      description: "Reconcile all bank accounts with the general ledger",
+      apiEndpoint: "/api/gl/transactions/unreconciled",
+    },
+    {
+      id: "step-2",
+      name: "Accounts Receivable Review",
+      status: "pending",
+      description: "Review and age all outstanding receivables",
+      apiEndpoint: "/api/gl/transactions/unreconciled",
+    },
+    {
+      id: "step-3",
+      name: "Accounts Payable Review",
+      status: "pending",
+      description: "Review and confirm all outstanding payables",
+      apiEndpoint: "/api/gl/transactions/unreconciled",
+    },
+    {
+      id: "step-4",
+      name: "Expense Accruals",
+      status: "pending",
+      description: "Record accruals for expenses incurred but not yet invoiced",
+      apiEndpoint: "/journal-entries",
+    },
+    {
+      id: "step-5",
+      name: "Revenue Recognition",
+      status: "pending",
+      description: "Ensure all revenue is properly recognized for the period",
+      apiEndpoint: "/journal-entries",
+    },
+    {
+      id: "step-6",
+      name: "Inventory Reconciliation",
+      status: "pending",
+      description: "Reconcile physical inventory with system records",
+    },
+    {
+      id: "step-7",
+      name: "Financial Statement Review",
+      status: "pending",
+      description: "Review draft financial statements for accuracy",
+      apiEndpoint: "/reports",
+    },
+    {
+      id: "step-8",
+      name: "Close Period",
+      status: "pending",
+      description: "Lock the period and finalize financial statements",
+    },
+  ]
 
   const executeStep = async (stepId: string) => {
     if (!currentPeriod) return
