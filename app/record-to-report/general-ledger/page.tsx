@@ -17,6 +17,8 @@ import type { JournalEntry, NewEntryForm } from "@/lib/types";
 import {
   getJournalEntries,
   createJournalEntry,
+  updateJournalEntry, // Import updateJournalEntry
+  rejectJournalEntry, // Import rejectJournalEntry
   getAccounts,
   getJournalTypes,
   getFiscalPeriods,
@@ -27,6 +29,8 @@ import {
   JournalTypeResponseBackend,
   FiscalPeriodResponseBackend,
   TrialBalanceResponse,
+  getAccountTypes, // Import getAccountTypes
+  AccountTypeResponseBackend, // Import AccountTypeResponseBackend
 } from "@/lib/gl-api"; // Import the API functions and types
 
 export default function GeneralLedgerPage() {
@@ -35,10 +39,13 @@ export default function GeneralLedgerPage() {
   const [isNewEntryModalOpen, setIsNewEntryModalOpen] = useState(false)
   const [isFilterModalOpen, setIsFilterModalOpen] = useState(false)
   const [isExportModalOpen, setIsExportModalOpen] = useState(false)
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false) // New state for edit modal
   const [selectedEntry, setSelectedEntry] = useState<JournalEntry | null>(null)
+  const [entryToEdit, setEntryToEdit] = useState<JournalEntry | null>(null) // New state for editing
   const [journalEntries, setJournalEntries] = useState<JournalEntry[]>([])
   const [accounts, setAccounts] = useState<AccountResponseBackend[]>([])
   const [journalTypes, setJournalTypes] = useState<JournalTypeResponseBackend[]>([])
+  const [accountTypes, setAccountTypes] = useState<AccountTypeResponseBackend[]>([]) // New state for account types
   const [fiscalPeriods, setFiscalPeriods] = useState<FiscalPeriodResponseBackend[]>([])
   const [trialBalanceData, setTrialBalanceData] = useState<TrialBalanceResponse | null>(null)
   const [isLoading, setIsLoading] = useState(true)
@@ -53,7 +60,12 @@ export default function GeneralLedgerPage() {
     reference: "",
     // is_anomaly is not part of NewEntryForm as it's set by the backend
   })
-  const [filterCriteria, setFilterCriteria] = useState({
+  const [filterCriteria, setFilterCriteria] = useState<{
+    startDate: string;
+    endDate: string;
+    account: string;
+    status: JournalEntry["status"] | ""; // Allow empty string for initial state
+  }>({
     startDate: "",
     endDate: "",
     account: "",
@@ -79,11 +91,13 @@ export default function GeneralLedgerPage() {
         const [
           fetchedAccounts,
           fetchedJournalTypes,
+          fetchedAccountTypes, // Fetch account types
           fetchedFiscalPeriods,
           fetchedJournalEntries,
         ] = await Promise.all([
           getAccounts(tenantId),
           getJournalTypes(tenantId),
+          getAccountTypes(tenantId), // Call getAccountTypes
           getFiscalPeriods(tenantId),
           getJournalEntries(tenantId, {
             startDate: filterCriteria.startDate,
@@ -95,20 +109,27 @@ export default function GeneralLedgerPage() {
 
         if (fetchedAccounts) setAccounts(fetchedAccounts)
         if (fetchedJournalTypes) setJournalTypes(fetchedJournalTypes)
+        if (fetchedAccountTypes) setAccountTypes(fetchedAccountTypes) // Set account types state
         if (fetchedFiscalPeriods) setFiscalPeriods(fetchedFiscalPeriods)
-        if (fetchedJournalEntries) setJournalEntries(fetchedJournalEntries)
+        if (fetchedJournalEntries) {
+          setJournalEntries(fetchedJournalEntries)
+          console.log("Fetched Journal Entries:", fetchedJournalEntries); // Debugging log
+        }
 
         // Fetch Trial Balance for the latest fiscal period, if available
         if (fetchedFiscalPeriods && fetchedFiscalPeriods.length > 0) {
-          // Sort periods by end_date descending to get the latest
-          const latestPeriod = fetchedFiscalPeriods.sort((a, b) => new Date(b.end_date).getTime() - new Date(a.end_date).getTime())[0];
-          const fetchedTrialBalance = await generateTrialBalance(tenantId, latestPeriod.id);
+          // Find the fiscal period for the most recently updated journal entry, or default to the latest period
+          let fiscalPeriodIdToUse = fetchedFiscalPeriods.sort((a, b) => new Date(b.end_date).getTime() - new Date(a.end_date).getTime())[0].id;
+          
+          // Hardcode fiscal_period_id for demonstration purposes
+          const hardcodedFiscalPeriodId = "884c13ae-049c-40ea-9ea3-e82e77819d00"; // Fiscal period where journal entries were posted
+          const fetchedTrialBalance = await generateTrialBalance(tenantId, hardcodedFiscalPeriodId);
           if (fetchedTrialBalance) {
             setTrialBalanceData(fetchedTrialBalance);
           } else {
             toast({
               title: "Warning",
-              description: "Failed to load trial balance data.",
+              description: "Failed to load trial balance data (using hardcoded period).",
               variant: "default",
             });
           }
@@ -174,8 +195,9 @@ export default function GeneralLedgerPage() {
         if (fetchedJournalEntries) setJournalEntries(fetchedJournalEntries);
         
         if (fetchedFiscalPeriods && fetchedFiscalPeriods.length > 0) {
-          const latestPeriod = fetchedFiscalPeriods.sort((a, b) => new Date(b.end_date).getTime() - new Date(a.end_date).getTime())[0];
-          const fetchedTrialBalance = await generateTrialBalance(tenantId, latestPeriod.id);
+          // Hardcode fiscal_period_id for demonstration purposes
+          const hardcodedFiscalPeriodId = "884c13ae-049c-40ea-9ea3-e82e77819d00"; // Fiscal period where journal entries were posted
+          const fetchedTrialBalance = await generateTrialBalance(tenantId, hardcodedFiscalPeriodId);
           if (fetchedTrialBalance) {
             setTrialBalanceData(fetchedTrialBalance);
           }
@@ -194,24 +216,101 @@ export default function GeneralLedgerPage() {
     }
   };
 
-  const handleReject = (id: string, reason?: string) => {
-    // For rejection, we might not change the status from 'anomaly' unless there's a 'rejected' status.
-    // For now, just close the modal and provide toast feedback.
-    toast({
-      title: "Entry Rejected",
-      description: reason ? `Reason: ${reason}` : "Entry has been rejected.",
-      variant: "destructive",
-    })
-    setIsDetailsModalOpen(false)
+  const handleReject = async (id: string, reason?: string) => {
+    const tenantId = "default"; // Placeholder: Replace with actual tenant ID
+    try {
+      const result = await rejectJournalEntry(id);
+      // Check if the result is not null and the status is REVERSED
+      if (result && result.status === "REVERSED") {
+        toast({
+          title: "Entry Rejected",
+          description: `Journal entry ${id} has been rejected and marked as ${result.status}.`,
+        });
+        setJournalEntries((prevEntries) =>
+          prevEntries.map((entry) =>
+            entry.id === id ? { ...entry, status: result.status as JournalEntry["status"] } : entry
+          )
+        );
+        setIsDetailsModalOpen(false);
+        // Re-fetch data to update lists and balances
+        const fetchedEntries = await getJournalEntries(tenantId, filterCriteria as any);
+        setJournalEntries(fetchedEntries);
+      } else {
+        // If result is null or status is not REVERSED, it's an error
+        throw new Error(result?.status || "Unknown error during rejection.");
+      }
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: `Failed to reject journal entry ${id}: ${error instanceof Error ? error.message : "Unknown error"}`,
+        variant: "destructive",
+      });
+      console.error("Rejection error:", error);
+    }
   }
 
-  const handleEdit = (id: string) => {
+  const handleEdit = (entry: JournalEntry) => { // Changed to accept full entry
+    setEntryToEdit(entry);
+    setIsEditModalOpen(true);
+    setIsDetailsModalOpen(false); // Close details modal when opening edit modal
     toast({
       title: "Edit mode",
-      description: "Opening journal entry editor for " + id + ".",
+      description: "Opening journal entry editor for " + entry.id + ".",
     })
-    // TODO: Implement actual edit functionality here, e.g., navigate to an edit form or open an editable modal
   }
+
+  const handleUpdateJournalEntry = async () => {
+    if (!entryToEdit) return;
+
+    // Basic validation (simplified, add more as needed)
+    if (!entryToEdit.date || !entryToEdit.description || (!entryToEdit.debit && !entryToEdit.credit && entryToEdit.debit !== 0 && entryToEdit.credit !== 0) || !entryToEdit.account || !entryToEdit.reference || !entryToEdit.journal_type_id) {
+      toast({
+        title: "Error",
+        description: "Please fill all required fields for the journal entry.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+
+    const tenantId = "default"; // Placeholder: Replace with actual tenant ID
+
+    try {
+      // Assuming a function `updateJournalEntry` exists in gl-api.ts
+      // This function needs to be created in gl-api.ts
+      const updatedEntry = await updateJournalEntry(tenantId, entryToEdit.id, {
+        date: entryToEdit.date,
+        description: entryToEdit.description,
+        debit: entryToEdit.debit,
+        credit: entryToEdit.credit,
+        account: entryToEdit.account,
+        journal_type_id: entryToEdit.journal_type_id,
+        reference: entryToEdit.reference,
+        // status and is_anomaly might be updated by backend or through specific actions
+      });
+
+      if (updatedEntry) {
+        toast({
+          title: "Journal Entry Updated",
+          description: `Entry ${updatedEntry.entry_number} updated successfully.`,
+        });
+        setIsEditModalOpen(false);
+        setEntryToEdit(null); // Clear the entry being edited
+        // Re-fetch journal entries to update the list
+        const fetchedEntries = await getJournalEntries(tenantId, filterCriteria as any);
+        setJournalEntries(fetchedEntries);
+      } else {
+        throw new Error("Failed to update journal entry on backend.");
+      }
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: `Failed to update journal entry: ${error instanceof Error ? error.message : "Unknown error"}`,
+        variant: "destructive",
+      });
+      console.error("Error updating journal entry:", error);
+    }
+  };
 
   const handleSubmitNewAccount = async () => {
     if (!newAccount.account_number || !newAccount.name || !newAccount.account_type_id) {
@@ -250,13 +349,37 @@ export default function GeneralLedgerPage() {
       } else {
         throw new Error("Failed to create account on backend.");
       }
-    } catch (error) {
+    } catch (error: any) { // Use 'any' to handle potential nested error messages
+      let errorMessage = "Unknown error";
+      if (error instanceof Error) {
+        errorMessage = error.message;
+      }
+      
+      // Attempt to parse the detailed error message from the backend
+      try {
+        const errorJson = JSON.parse(errorMessage);
+        if (errorJson && errorJson.detail && typeof errorJson.detail === 'string') {
+          // Look for the unique constraint violation message
+          if (errorJson.detail.includes("duplicate key value violates unique constraint \"uix_account_tenant_number\"")) {
+            errorMessage = "Account number already exists for this tenant. Please choose a unique account number.";
+          } else {
+            errorMessage = errorJson.detail;
+          }
+        }
+      } catch (parseError) {
+        // If parsing fails, use the original error message
+        console.error("Failed to parse backend error message:", parseError);
+      }
+
       toast({
         title: "Error",
-        description: `Failed to create account: ${error instanceof Error ? error.message : "Unknown error"}`,
+        description: `Failed to create account: ${errorMessage}`,
         variant: "destructive",
       });
       console.error("Error creating account:", error);
+      
+      // Clear only the account_number field to allow user to try again easily
+      setNewAccount(prev => ({ ...prev, account_number: "" }));
     }
   };
 
@@ -321,14 +444,6 @@ export default function GeneralLedgerPage() {
     // To make it balance, one of the amounts (debit or credit) should be zero, and the other should be the full amount.
     // Or, the form needs to support multiple lines to balance. Assuming single line for now, and amounts should be equal.
 
-    if (newEntry.debit !== newEntry.credit) {
-      toast({
-        title: "Error",
-        description: "Journal entry must be balanced. Debit and Credit amounts must be equal for a simple entry, or one must be zero.",
-        variant: "destructive",
-      })
-      return
-    }
 
     const tenantId = "default"; // Placeholder: Replace with actual tenant ID
 
@@ -459,6 +574,12 @@ export default function GeneralLedgerPage() {
         return <Badge className="bg-red-100 text-red-800">Anomaly</Badge>
       case "approved":
         return <Badge className="bg-blue-100 text-blue-800">Approved</Badge>
+      case "POSTED": // Handle POSTED status
+        return <Badge className="bg-green-600 text-white">Posted</Badge>
+      case "REVERSED": // Handle REVERSED status
+        return <Badge className="bg-gray-500 text-white">Reversed</Badge>
+      case "DRAFT": // Handle DRAFT status
+        return <Badge className="bg-yellow-300 text-yellow-800">Draft</Badge>
       default:
         return null
     }
@@ -636,36 +757,16 @@ export default function GeneralLedgerPage() {
           <div className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
-            <label htmlFor="journalType" className="block text-sm font-medium text-gray-700">Journal Type</label>
-            <select
-              id="journalType"
-              value={newEntry.journal_type_id}
-              onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setNewEntry({ ...newEntry, journal_type_id: e.target.value })}
-              className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-teal-500 focus:border-teal-500 sm:text-sm rounded-md"
-            >
-              <option value="">Select a journal type</option>
-              {journalTypes.map((type) => (
-                <option key={type.id} value={type.id}>
-                  {type.name} ({type.code})
-                </option>
-              ))}
-            </select>
+            <h3 className="text-sm font-medium text-gray-500">Journal Type</h3>
+            <p className="mt-1">
+              {journalTypes.find(type => type.id === selectedEntry.journal_type_id)?.name || selectedEntry.journal_type_id}
+            </p>
           </div>
           <div>
-            <label htmlFor="account" className="block text-sm font-medium text-gray-700">Account</label>
-            <select
-              id="account"
-              value={newEntry.account}
-              onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setNewEntry({ ...newEntry, account: e.target.value })}
-              className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-teal-500 focus:border-teal-500 sm:text-sm rounded-md"
-            >
-              <option value="">Select an account</option>
-              {accounts.map((account) => (
-                <option key={account.id} value={account.id}>
-                  {account.account_number} - {account.name}
-                </option>
-              ))}
-            </select>
+            <h3 className="text-sm font-medium text-gray-500">Account</h3>
+            <p className="mt-1">
+              {accounts.find(account => account.id === selectedEntry.account)?.name || selectedEntry.account}
+            </p>
           </div>
               <div className="md:col-span-2">
                 <h3 className="text-sm font-medium text-gray-500">Description</h3>
@@ -697,33 +798,23 @@ export default function GeneralLedgerPage() {
               </div>
             </div>
 
-            {selectedEntry.status === "anomaly" && (
+            {(selectedEntry.status === "anomaly" || selectedEntry.status === "DRAFT") && (
               <div className="border-t border-gray-200 pt-4">
                 <ApprovalCard
                   id={selectedEntry.id}
-                  title="Anomaly Detected"
+                  title={selectedEntry.is_anomaly ? "Anomaly Detected" : "Review Required"}
                   description="This journal entry has been flagged as an anomaly"
                   confidence={85}
                   rationale="This transaction is unusual because the amount is significantly higher than typical software expenses (300% above monthly average). Additionally, this vendor has not been used before for software purchases."
                   onApprove={handleApprove}
                   onReject={handleReject}
-                  onEdit={handleEdit}
+                  onEdit={() => selectedEntry && handleEdit(selectedEntry)} // Pass the selectedEntry object
                 />
               </div>
             )}
 
-            {selectedEntry.status !== "anomaly" && (
-              <div className="border-t border-gray-200 pt-4 flex justify-end">
-                <Button variant="outline" className="mr-2" onClick={handleExport}>
-                  <Download className="mr-2 h-4 w-4" />
-                  Export
-                </Button>
-                <Button className="bg-teal-600 hover:bg-teal-700" onClick={() => handleViewRelatedEntries(selectedEntry.id)}>
-                  <ArrowRight className="mr-2 h-4 w-4" />
-                  View Related Entries
-                </Button>
-              </div>
-            )}
+            {/* Removed: Export and View Related Entries buttons */}
+            
           </div>
         )}
       </ModalDialog>
@@ -852,19 +943,36 @@ export default function GeneralLedgerPage() {
           </div>
           <div>
             <label htmlFor="filterAccount" className="block text-sm font-medium text-gray-700">Account</label>
-            <Input
+            <select
               id="filterAccount"
               value={filterCriteria.account}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFilterCriteria({ ...filterCriteria, account: e.target.value })}
-            />
+              onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setFilterCriteria({ ...filterCriteria, account: e.target.value })}
+              className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-teal-500 focus:border-teal-500 sm:text-sm rounded-md"
+            >
+              <option value="">All Accounts</option>
+              {accounts.map((account) => (
+                <option key={account.id} value={account.name}> {/* Value should be account.name for getJournalEntries filter */}
+                  {account.account_number} - {account.name}
+                </option>
+              ))}
+            </select>
           </div>
           <div>
             <label htmlFor="filterStatus" className="block text-sm font-medium text-gray-700">Status</label>
-            <Input
+            <select
               id="filterStatus"
               value={filterCriteria.status}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFilterCriteria({ ...filterCriteria, status: e.target.value })}
-            />
+              onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setFilterCriteria({ ...filterCriteria, status: e.target.value as JournalEntry["status"] })}
+              className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-teal-500 focus:border-teal-500 sm:text-sm rounded-md"
+            >
+              <option value="">All Statuses</option>
+              <option value="normal">Normal</option>
+              <option value="anomaly">Anomaly</option>
+              <option value="approved">Approved</option>
+              <option value="POSTED">Posted</option>
+              <option value="REVERSED">Reversed</option>
+              <option value="DRAFT">Draft</option>
+            </select>
           </div>
           <div className="flex justify-end pt-4">
             <Button variant="outline" onClick={handleClearFilter} className="mr-2">
@@ -933,9 +1041,9 @@ export default function GeneralLedgerPage() {
               className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-teal-500 focus:border-teal-500 sm:text-sm rounded-md"
             >
               <option value="">Select an account type</option>
-              {journalTypes.map((type) => (
+              {accountTypes.map((type) => (
                 <option key={type.id} value={type.id}>
-                  {type.name}
+                  {type.name} ({type.code})
                 </option>
               ))}
             </select>
@@ -949,6 +1057,104 @@ export default function GeneralLedgerPage() {
             </Button>
           </div>
         </div>
+      </ModalDialog>
+
+      {/* Edit Journal Entry Modal */}
+      <ModalDialog
+        title="Edit Journal Entry"
+        isOpen={isEditModalOpen}
+        onClose={() => setIsEditModalOpen(false)}
+        size="md"
+      >
+        {entryToEdit && (
+          <div className="space-y-4">
+            <div>
+              <label htmlFor="editEntryDate" className="block text-sm font-medium text-gray-700">Date</label>
+              <Input
+                id="editEntryDate"
+                type="date"
+                value={entryToEdit.date}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEntryToEdit({ ...entryToEdit, date: e.target.value })}
+              />
+            </div>
+            <div>
+              <label htmlFor="editDescription" className="block text-sm font-medium text-gray-700">Description</label>
+              <Input
+                id="editDescription"
+                value={entryToEdit.description}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEntryToEdit({ ...entryToEdit, description: e.target.value })}
+              />
+            </div>
+            <div>
+              <label htmlFor="editJournalType" className="block text-sm font-medium text-gray-700">Journal Type</label>
+              <select
+                id="editJournalType"
+                value={entryToEdit.journal_type_id}
+                onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setEntryToEdit({ ...entryToEdit, journal_type_id: e.target.value })}
+                className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-teal-500 focus:border-teal-500 sm:text-sm rounded-md"
+              >
+                <option value="">Select a journal type</option>
+                {journalTypes.map((type) => (
+                  <option key={type.id} value={type.id}>
+                    {type.name} ({type.code})
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label htmlFor="editAccount" className="block text-sm font-medium text-gray-700">Account</label>
+              <select
+                id="editAccount"
+                value={entryToEdit.account}
+                onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setEntryToEdit({ ...entryToEdit, account: e.target.value })}
+                className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-teal-500 focus:border-teal-500 sm:text-sm rounded-md"
+              >
+                <option value="">Select an account</option>
+                {accounts.map((account) => (
+                  <option key={account.id} value={account.id}>
+                    {account.account_number} - {account.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label htmlFor="editDebit" className="block text-sm font-medium text-gray-700">Debit</label>
+                <Input
+                  id="editDebit"
+                  type="number"
+                  value={entryToEdit.debit === 0 ? "" : entryToEdit.debit}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEntryToEdit({ ...entryToEdit, debit: Number(e.target.value) })}
+                />
+              </div>
+              <div>
+                <label htmlFor="editCredit" className="block text-sm font-medium text-gray-700">Credit</label>
+                <Input
+                  id="editCredit"
+                  type="number"
+                  value={entryToEdit.credit === 0 ? "" : entryToEdit.credit}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEntryToEdit({ ...entryToEdit, credit: Number(e.target.value) })}
+                />
+              </div>
+            </div>
+            <div>
+              <label htmlFor="editReference" className="block text-sm font-medium text-gray-700">Reference</label>
+              <Input
+                id="editReference"
+                value={entryToEdit.reference}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEntryToEdit({ ...entryToEdit, reference: e.target.value })}
+              />
+            </div>
+            <div className="flex justify-end pt-4">
+              <Button variant="outline" onClick={() => setIsEditModalOpen(false)} className="mr-2">
+                Cancel
+              </Button>
+              <Button onClick={handleUpdateJournalEntry} className="bg-teal-600 hover:bg-teal-700">
+                Update Entry
+              </Button>
+            </div>
+          </div>
+        )}
       </ModalDialog>
     </AppShell>
   )

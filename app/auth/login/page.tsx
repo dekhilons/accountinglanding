@@ -26,37 +26,43 @@ export default function LoginPage() {
     e.preventDefault()
     setIsLoading(true)
 
-    // Simulate authentication
-    setTimeout(() => {
-      if (formData.email && formData.password) {
-        // Store user session (in a real app, this would be handled by your auth provider)
-        localStorage.setItem(
-          "user",
-          JSON.stringify({
-            id: "user-1001",
-            name: "John Doe",
-            email: formData.email,
-            role: "admin",
-            avatar: "/placeholder.svg?height=32&width=32",
-          }),
-        )
+    try {
+      const response = await fetch("/auth/token", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: new URLSearchParams({
+          username: formData.email,
+          password: formData.password,
+        }).toString(),
+      })
 
-        toast({
-          title: "Login Successful",
-          description: "Welcome back! Redirecting to dashboard...",
-        })
-
-        // Redirect to dashboard
-        router.push("/dashboard")
-      } else {
-        toast({
-          title: "Login Failed",
-          description: "Please check your credentials and try again.",
-          variant: "destructive",
-        })
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.detail || "Login failed")
       }
+
+      const data = await response.json()
+      localStorage.setItem("access_token", data.access_token)
+      // Store a dummy user object for AppShell to pick up
+      localStorage.setItem("user", JSON.stringify({ email: formData.email, name: "Logged In User" }));
+
+      toast({
+        title: "Login Successful",
+        description: "Welcome back! Redirecting to dashboard...",
+      })
+
+      router.push("/dashboard")
+    } catch (error: any) {
+      toast({
+        title: "Login Failed",
+        description: error.message || "An unexpected error occurred.",
+        variant: "destructive",
+      })
+    } finally {
       setIsLoading(false)
-    }, 1500)
+    }
   }
 
   return (

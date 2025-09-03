@@ -6,6 +6,7 @@ import {
   type PaymentCreate,
   formatCurrency,
   formatDate,
+  invoiceAPI,
 } from "@/lib/ar-api"
 import { ARRemittance } from "../types/ar-specific-types"
 
@@ -22,7 +23,7 @@ export const usePaymentsData = () => {
     payment_number: "",
     amount: 0,
     currency: "USD",
-    payment_date: new Date().toISOString().split("T")[0],
+    payment_date: new Date().toISOString(),
     payment_method: "WIRE",
     reference_number: "",
     description: "",
@@ -101,7 +102,7 @@ export const usePaymentsData = () => {
         payment_number: "",
         amount: 0,
         currency: "USD",
-        payment_date: new Date().toISOString().split("T")[0],
+        payment_date: new Date().toISOString(),
         payment_method: "WIRE",
         reference_number: "",
         description: "",
@@ -125,13 +126,140 @@ export const usePaymentsData = () => {
     setShowDetailPanel(false)
     setSelectedItem(null)
   }
+  console.log(selectedItem)  
 
-  const handleApplyRemaining = (id: string) => {
-    toast({
-      title: "Payment Applied",
-      description: `Remaining balance for payment ${id} has been applied.`,
-    })
-  }
+  const handleApplyRemaining = async (paymentId: string) => {
+    console.log("Apply Remaining clicked for payment:", paymentId);
+    console.log("Selected item:", selectedItem);
+    console.log("Selected item metadata:", selectedItem?.metadata);
+
+    if (!selectedItem) {
+      console.error("No selected item found");
+      toast({
+        title: "Error",
+        description: "No payment selected.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Check if payment has any applied amount
+    const appliedAmount = selectedItem.metadata?.applied_amount || 0;
+    const remainingAmount = selectedItem.amount - appliedAmount;
+
+    console.log("Applied amount:", appliedAmount);
+    console.log("Remaining amount:", remainingAmount);
+
+    if (remainingAmount <= 0) {
+      console.log("Payment is already fully applied");
+      toast({
+        title: "Info",
+        description: "Payment is already fully applied.",
+      });
+      return;
+    }
+
+    // Check for matched invoices from classification
+    const matchedInvoices = selectedItem.metadata?.matched_invoices_from_classification || [];
+    console.log("Matched invoices from classification:", matchedInvoices);
+
+    if (matchedInvoices.length === 0) {
+      console.log("No matched invoices from classification, attempting to find outstanding invoices...");
+
+      // For NO_MATCH payments, we still want to allow applying remaining balance
+      // Let's try to find outstanding invoices for this customer
+      // This is a simplified approach - in a real app, you'd show a dialog to choose which invoice
+
+      try {
+        // Get outstanding invoices for this customer
+        const outstandingInvoices = await invoiceAPI.getByCustomer(selectedItem.customer_id!, "OPEN,PARTIAL,OVERDUE");
+
+        if (outstandingInvoices.length === 0) {
+          toast({
+            title: "No Outstanding Invoices",
+            description: "No outstanding invoices found for this customer to apply the payment to.",
+            variant: "destructive",
+          });
+          return;
+        }
+
+        // Use the first outstanding invoice (in a real app, show a selection dialog)
+        const targetInvoice = outstandingInvoices[0];
+        console.log("Using first outstanding invoice:", targetInvoice);
+
+        const reconciliationData = {
+          tenant_id: selectedItem.tenant_id,
+          invoice_id: targetInvoice.id,
+          payment_id: paymentId,
+          amount: remainingAmount,
+          currency: selectedItem.currency,
+          is_auto_matched: false,
+          confidence_score: 0.5, // Lower confidence for manual application
+        };
+
+        console.log("Calling reconcilePayment for NO_MATCH payment:", reconciliationData);
+
+        await reconcilePayment(paymentId, reconciliationData);
+        console.log("Reconciliation API call successful for NO_MATCH payment");
+
+        toast({
+          title: "Reconciliation Successful",
+          description: `Remaining balance of ${formatCurrency(remainingAmount, selectedItem.currency)} applied to invoice ${targetInvoice.invoice_number}.`,
+        });
+        refetchPayments();
+        handleCloseDetailPanel();
+
+      } catch (invoiceError: any) {
+        console.error("Failed to get outstanding invoices:", invoiceError);
+        toast({
+          title: "Error",
+          description: "Failed to find outstanding invoices for this customer.",
+          variant: "destructive",
+        });
+      }
+      return;
+    }
+
+    // Use the first matched invoice
+    const matchedInvoice = matchedInvoices[0];
+    const invoiceId = matchedInvoice.invoice_id;
+
+    console.log("Using matched invoice:", matchedInvoice);
+    console.log("Invoice ID:", invoiceId);
+    console.log("Amount to apply:", remainingAmount);
+
+    try {
+      // Create InvoicePaymentCreate object
+      const reconciliationData = {
+        tenant_id: selectedItem.tenant_id,
+        invoice_id: invoiceId,
+        payment_id: paymentId, // This field is ignored by backend, but good to include for type safety
+        amount: remainingAmount,
+        currency: selectedItem.currency,
+        is_auto_matched: false, // This is a manual action
+        confidence_score: matchedInvoice.confidence_score || 1.0,
+      };
+
+      console.log("Calling reconcilePayment with data:", reconciliationData);
+
+      await reconcilePayment(paymentId, reconciliationData);
+      console.log("Reconciliation API call successful");
+
+      toast({
+        title: "Reconciliation Successful",
+        description: `Remaining balance of ${formatCurrency(remainingAmount, selectedItem.currency)} for payment ${paymentId} has been applied to invoice ${matchedInvoice.invoice_number}.`,
+      });
+      refetchPayments(); // Refresh payments data
+      handleCloseDetailPanel(); // Close detail panel
+    } catch (error: any) {
+      console.error("Reconciliation failed:", error);
+      toast({
+        title: "Reconciliation Failed",
+        description: error.message || `Failed to apply remaining balance for payment ${paymentId}.`,
+        variant: "destructive",
+      });
+    }
+  };
 
   const handleSendReminder = (id: string) => {
     toast({
@@ -154,11 +282,22 @@ export const usePaymentsData = () => {
     })
   }
 
-  const handleReclassifyPayment = (id: string) => {
-    toast({
-      title: "Reclassification Initiated",
-      description: `Reclassification process started for payment ${id}.`,
-    })
+  const handleReclassifyPayment = async (id: string) => {
+    try {
+      await classifyPayment(id)
+      toast({
+        title: "Reclassification Successful",
+        description: `Payment ${id} has been reclassified.`,
+      })
+      refetchPayments() // Refresh payments data to reflect changes
+      handleCloseDetailPanel() // Close detail panel if reclassification changes payment status/details
+    } catch (error: any) {
+      toast({
+        title: "Reclassification Failed",
+        description: error.message || `Failed to reclassify payment ${id}.`,
+        variant: "destructive",
+      })
+    }
   }
 
   const handleApproveMatch = (id: string) => {

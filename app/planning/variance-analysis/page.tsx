@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react" // Import useEffect
 import { Filter, Download, Edit, Check, TrendingUp, TrendingDown } from "lucide-react"
 import { AppShell } from "@/components/layout/app-shell"
 import { Button } from "@/components/ui/button"
@@ -11,8 +11,8 @@ import { ModalDialog } from "@/components/ui/modal-dialog"
 import { Textarea } from "@/components/ui/textarea"
 import { useToast } from "@/hooks/use-toast"
 
-// Define column types
-type VarianceItem = {
+// Define column types matching backend VarianceItem
+type BackendVarianceItem = {
   id: string
   category: string
   subcategory: string
@@ -24,79 +24,73 @@ type VarianceItem = {
   status: "draft" | "approved" | "distributed"
 }
 
+// Define backend VarianceReportPayload structure
+type VarianceReportPayload = {
+  reportId: string
+  tenantId: string
+  period: string
+  narrative: string
+  varianceDetails: BackendVarianceItem[]
+  status: "draft" | "approved" | "distributed"
+  modelVersion: string
+  createdAt: string
+  updatedAt: string
+}
+
+// Frontend VarianceItem will also include the reportId for updates
+type FrontendVarianceItem = BackendVarianceItem & { reportId: string }
+
 export default function VarianceAnalysisPage() {
   const { toast } = useToast()
   const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false)
   const [isEditModalOpen, setIsEditModalOpen] = useState(false)
-  const [selectedVariance, setSelectedVariance] = useState<VarianceItem | null>(null)
+  const [selectedVariance, setSelectedVariance] = useState<FrontendVarianceItem | null>(null)
   const [editedCommentary, setEditedCommentary] = useState("")
+  const [varianceReports, setVarianceReports] = useState<VarianceReportPayload[]>([]) // Store raw reports
+  const [varianceItems, setVarianceItems] = useState<FrontendVarianceItem[]>([]) // Flattened items for table
 
-  // Sample data for variance analysis
-  const varianceItems: VarianceItem[] = [
-    {
-      id: "var-1001",
-      category: "Marketing",
-      subcategory: "Trade Shows",
-      budget: 10000,
-      actual: 22500,
-      variance: -12500,
-      variancePercent: -125,
-      commentary:
-        "Marketing expenses are 125% over budget this month, primarily due to the unplanned trade show participation ($12,500). However, this is offset by new customer acquisition, with 15 new accounts signed this month directly attributed to the event.",
-      status: "draft",
-    },
-    {
-      id: "var-1002",
-      category: "Sales",
-      subcategory: "Commissions",
-      budget: 50000,
-      actual: 65000,
-      variance: -15000,
-      variancePercent: -30,
-      commentary:
-        "Sales commissions exceeded budget by 30% due to higher than expected sales volume in Q2. This is a positive variance as it directly correlates with increased revenue.",
-      status: "approved",
-    },
-    {
-      id: "var-1003",
-      category: "Operations",
-      subcategory: "Utilities",
-      budget: 8000,
-      actual: 6500,
-      variance: 1500,
-      variancePercent: 18.75,
-      commentary:
-        "Utility costs were 18.75% under budget due to energy efficiency improvements implemented last quarter and lower than expected usage.",
-      status: "distributed",
-    },
-    {
-      id: "var-1004",
-      category: "IT",
-      subcategory: "Software Licenses",
-      budget: 15000,
-      actual: 12000,
-      variance: 3000,
-      variancePercent: 20,
-      commentary:
-        "Software license costs were 20% under budget due to renegotiated enterprise agreements and consolidation of redundant systems.",
-      status: "draft",
-    },
-    {
-      id: "var-1005",
-      category: "HR",
-      subcategory: "Recruiting",
-      budget: 20000,
-      actual: 25000,
-      variance: -5000,
-      variancePercent: -25,
-      commentary:
-        "Recruiting expenses exceeded budget by 25% due to increased hiring activity and use of external recruiters for specialized positions.",
-      status: "draft",
-    },
-  ]
+  const TENANT_ID = "default_tenant_id" // Assuming a default tenant ID
+
+  // Fetch variance data from API
+  const fetchVarianceReports = async () => {
+    try {
+      const response = await fetch(`/variance-reports?tenant_id=${TENANT_ID}`)
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+      const data: VarianceReportPayload[] = await response.json()
+      setVarianceReports(data)
+
+      // Flatten varianceDetails from all reports into a single array for the table
+      const flattenedItems: FrontendVarianceItem[] = []
+      data.forEach(report => {
+        report.varianceDetails.forEach(item => {
+          flattenedItems.push({ ...item, reportId: report.reportId }) // Add reportId to each item
+        })
+      })
+      setVarianceItems(flattenedItems)
+
+      toast({
+        title: "Variance Data Loaded",
+        description: "The latest variance reports have been fetched.",
+      })
+    } catch (error) {
+      console.error("Failed to fetch variance reports:", error)
+      toast({
+        title: "Error",
+        description: "Failed to fetch variance data.",
+        variant: "destructive",
+      })
+    }
+  }
+
+  // Initial fetch on component mount
+  useEffect(() => {
+    fetchVarianceReports()
+  }, [])
 
   // Handle row click to show details
-  const handleRowClick = (variance: VarianceItem) => {
+  const handleRowClick = (variance: FrontendVarianceItem) => {
     setSelectedVariance(variance)
     setIsDetailsModalOpen(true)
   }
@@ -110,27 +104,78 @@ export default function VarianceAnalysisPage() {
   }
 
   // Handle save commentary
-  const handleSaveCommentary = () => {
+  const handleSaveCommentary = async () => {
     if (!selectedVariance) return
-    toast({
-      title: "Commentary Updated",
-      description: "The variance commentary has been updated.",
-    })
-    setIsEditModalOpen(false)
+
+    try {
+      const response = await fetch(`/variance-reports/${selectedVariance.reportId}?tenant_id=${TENANT_ID}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          variance_item_id: selectedVariance.id,
+          updated_commentary: editedCommentary,
+        }),
+      })
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+
+      toast({
+        title: "Commentary Updated",
+        description: "The variance commentary has been updated.",
+      })
+      setIsEditModalOpen(false)
+      fetchVarianceReports() // Re-fetch data to update the table
+    } catch (error) {
+      console.error("Failed to save commentary:", error)
+      toast({
+        title: "Error",
+        description: "Failed to update commentary.",
+        variant: "destructive",
+      })
+    }
   }
 
   // Handle approve for distribution
-  const handleApproveForDistribution = () => {
+  const handleApproveForDistribution = async () => {
     if (!selectedVariance) return
-    toast({
-      title: "Approved for Distribution",
-      description: "The variance analysis has been approved for distribution.",
-    })
-    setIsDetailsModalOpen(false)
+
+    try {
+      const response = await fetch(`/variance-reports/${selectedVariance.reportId}?tenant_id=${TENANT_ID}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          status: "approved",
+        }),
+      })
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+
+      toast({
+        title: "Approved for Distribution",
+        description: "The variance analysis has been approved for distribution.",
+      })
+      setIsDetailsModalOpen(false)
+      fetchVarianceReports() // Re-fetch data to update the table
+    } catch (error) {
+      console.error("Failed to approve for distribution:", error)
+      toast({
+        title: "Error",
+        description: "Failed to approve variance report.",
+        variant: "destructive",
+      })
+    }
   }
 
   // Status badge component
-  const StatusBadge = ({ status }: { status: VarianceItem["status"] }) => {
+  const StatusBadge = ({ status }: { status: BackendVarianceItem["status"] }) => {
     switch (status) {
       case "draft":
         return <Badge className="bg-amber-100 text-amber-800">Draft</Badge>
@@ -197,7 +242,8 @@ export default function VarianceAnalysisPage() {
       accessorKey: "variance",
       header: "Variance",
       cell: ({ row }: any) => {
-        return <VarianceIndicator variance={row.getValue("variance")} percent={row.getValue("variancePercent")} />
+        // Access variance and variancePercent directly from row.original
+        return <VarianceIndicator variance={row.original.variance} percent={row.original.variancePercent} />
       },
     },
     {

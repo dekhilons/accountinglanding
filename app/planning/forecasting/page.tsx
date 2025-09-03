@@ -155,14 +155,17 @@ export default function ForecastingPage() {
       let cost_reduction_percent: number | undefined
 
       // Prepare the scenario request payload
+      const historicalDataForScenario = forecastData
+        .filter(item => item.actual !== null) // Only include actual historical data
+        .map(item => ({ ds: item.date, y: item.actual }));
+
       const baseForecastRequest = {
         period: getPeriod(selectedDate), // Use the selected period for the base forecast
         tenantId: TENANT_ID,
         metric_type: metric,
         horizon_days: timeframe === "7-day" ? 7 : (timeframe === "30-day" ? 30 : 90),
-        historical_data: [],
+        historical_data: historicalDataForScenario, // Populate with actual historical data
       }
-
       switch (scenarioType) {
         case 'revenue_growth':
           revenue_growth_percent = 0.10

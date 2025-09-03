@@ -44,38 +44,44 @@ export default function SignupPage() {
       return
     }
 
-    // Simulate account creation
-    setTimeout(() => {
-      if (formData.email && formData.password && formData.firstName && formData.lastName) {
-        // Store user session
-        localStorage.setItem(
-          "user",
-          JSON.stringify({
-            id: "user-" + Date.now(),
-            name: `${formData.firstName} ${formData.lastName}`,
-            email: formData.email,
-            company: formData.company,
-            role: formData.role || "user",
-            avatar: "/placeholder.svg?height=32&width=32",
-          }),
-        )
+    try {
+      const response = await fetch("/auth/register", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          email: formData.email,
+          password: formData.password,
+          first_name: formData.firstName,
+          last_name: formData.lastName,
+          company: formData.company,
+          role: formData.role,
+        }),
+      })
 
-        toast({
-          title: "Account Created",
-          description: "Welcome to AccountingAI! Redirecting to dashboard...",
-        })
-
-        // Redirect to dashboard
-        router.push("/dashboard")
-      } else {
-        toast({
-          title: "Signup Failed",
-          description: "Please fill in all required fields.",
-          variant: "destructive",
-        })
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.detail || "Account creation failed")
       }
+
+      toast({
+        title: "Account Created",
+        description: "Welcome to AccountingAI! Redirecting to dashboard...",
+      })
+
+      // After successful registration, you might want to automatically log the user in
+      // or redirect them to the login page. For simplicity, we'll redirect to dashboard.
+      router.push("/dashboard")
+    } catch (error: any) {
+      toast({
+        title: "Signup Failed",
+        description: error.message || "An unexpected error occurred.",
+        variant: "destructive",
+      })
+    } finally {
       setIsLoading(false)
-    }, 1500)
+    }
   }
 
   return (

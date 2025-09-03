@@ -15,6 +15,19 @@ const nextConfig = {
         source: '/api/v1/documents/:path*',
         destination: 'http://localhost:8001/api/v1/documents/:path*', // Proxy to your FastAPI backend
       },
+      // Proxy for the forecasting and variance analysis service
+      {
+        source: '/variance-reports/:path*',
+        destination: 'http://localhost:8004/variance-reports/:path*',
+      },
+      {
+        source: '/forecast/:path*',
+        destination: 'http://localhost:8004/forecast/:path*',
+      },
+      {
+        source: '/auth/token',
+        destination: '/api/auth/token',
+      },
     ];
   },
 }

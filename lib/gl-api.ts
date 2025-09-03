@@ -17,9 +17,12 @@ interface JournalEntryResponseBackend {
   status: string; // e.g., "DRAFT", "PENDING", "POSTED"
   is_recurring: boolean;
   is_auto_generated: boolean;
+  is_adjustment: boolean; // Added is_adjustment
   is_anomaly: boolean; // New field
   metadata_: any | null;
   lines: JournalEntryLineBackend[];
+  created_at?: string; // Added created_at
+  updated_at?: string; // Added updated_at (assuming it might exist)
 }
 
 interface JournalEntryLineBackend {
@@ -65,6 +68,15 @@ export interface FiscalPeriodResponseBackend {
     period_number: number;
     start_date: string;
     end_date: string;
+}
+
+export interface AccountTypeResponseBackend {
+    id: string;
+    tenant_id: string;
+    name: string;
+    code: string;
+    normal_balance: string; // "DEBIT" or "CREDIT"
+    is_active: boolean;
 }
 
 export interface TrialBalanceItem {
@@ -347,6 +359,7 @@ export async function getFiscalPeriods(tenantId: string, fiscalYearId?: string):
                     "Content-Type": "application/json",
                 },
             });
+
             if (!response.ok) {
                 const errorText = await response.text();
                 console.error(`Failed to fetch fiscal periods for tenant ${tenantId}:`, errorText);
@@ -375,7 +388,7 @@ export async function getJournalEntries(
     endDate?: string;
     description?: string;
     account?: string;
-    status?: "normal" | "anomaly" | "approved";
+    status?: "normal" | "anomaly" | "approved" | "DRAFT" | "POSTED" | "REVERSED"; // Added DRAFT, POSTED, and REVERSED
   }
 ): Promise<JournalEntry[]> {
   // Ensure account map is populated for converting account_id to account name
@@ -392,6 +405,10 @@ export async function getJournalEntries(
   
   // For account filter, convert account name to account ID
   if (filters?.account) {
+      // Ensure accountMap is populated before trying to get accountId
+      if (accountMap.size === 0) {
+          await getAccountMap();
+      }
       const accountId = accountNameToIdMap.get(filters.account);
       if (accountId) {
           queryParams.append("account_id", accountId);
@@ -438,9 +455,12 @@ export async function getJournalEntries(
         debit: totalDebit,
         credit: totalCredit,
         account: accountName || "N/A", // Use the resolved account name
+        journal_type_id: entry.journal_type_id, // Map journal_type_id
         reference: entry.reference,
-        status: entry.status as "normal" | "anomaly" | "approved", // Directly use the status mapped by backend
+        status: entry.status as "normal" | "anomaly" | "approved" | "DRAFT" | "POSTED" | "REVERSED", // Include all possible statuses
         is_anomaly: entry.is_anomaly,
+        created_at: entry.created_at, // Map created_at
+        fiscal_period_id: entry.fiscal_period_id, // Map fiscal_period_id
       };
     });
 
@@ -449,8 +469,37 @@ export async function getJournalEntries(
     console.error("Error fetching journal entries:", error);
     // Return empty array on error
     return [];
-  }
+    }
 }
+
+/**
+ * Fetches all account types for a tenant.
+ * @param tenantId The ID of the tenant.
+ * @returns A promise that resolves to an array of AccountTypeResponseBackend objects or null on error.
+ */
+export async function getAccountTypes(tenantId: string): Promise<AccountTypeResponseBackend[] | null> {
+    try {
+        const accountTypes = await cachedFetch<AccountTypeResponseBackend[]>(`account-types-${tenantId}`, async () => {
+            const response = await fetch(`${BASE_URL}/account-types?tenant_id=${tenantId}`, {
+                headers: {
+                    "X-API-Key": API_KEY,
+                    "Content-Type": "application/json",
+                },
+            });
+            if (!response.ok) {
+                const errorText = await response.text();
+                console.error(`Failed to fetch account types for tenant ${tenantId}:`, errorText);
+                throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+            }
+            return response.json();
+        });
+        return accountTypes;
+    } catch (error) {
+        console.error("Error in getAccountTypes:", error);
+        return null;
+    }
+}
+
 
 import type { NewEntryForm } from "./types"; // Import NewEntryForm
 
@@ -485,6 +534,69 @@ export async function createJournalEntry(
     return null; // Return null for component to handle error
   }
 
+  // Fetch accounts to find a "Cash" or "Bank" account for balancing
+  const allAccounts = await getAccounts(tenantId);
+  if (!allAccounts) {
+    console.error("Failed to fetch accounts for balancing journal entry.");
+    return null;
+  }
+
+  const cashAccount = allAccounts.find(account => 
+    account.name.toLowerCase().includes("cash") || account.name.toLowerCase().includes("bank")
+  );
+
+  if (!cashAccount) {
+    console.error("No suitable 'Cash' or 'Bank' account found for balancing.");
+    // Fallback: Could create a default suspense account or return error
+    return null;
+  }
+
+  const lines = [];
+  const amount = journalEntryData.debit > 0 ? journalEntryData.debit : journalEntryData.credit;
+  const description = journalEntryData.description;
+
+  // First line: User's provided account and amount
+  lines.push({
+    tenant_id: tenantId,
+    account_id: accountId,
+    line_number: 1,
+    description: description,
+    debit_amount: journalEntryData.debit,
+    credit_amount: journalEntryData.credit,
+    currency: "USD",
+    exchange_rate: 1.0,
+    reference: journalEntryData.reference,
+  });
+
+  // Second line: Balancing entry to the Cash account
+  if (journalEntryData.debit > 0) {
+    // If user debited their account, credit Cash account
+    lines.push({
+      tenant_id: tenantId,
+      account_id: cashAccount.id,
+      line_number: 2,
+      description: `Cash outflow for: ${description}`,
+      debit_amount: 0.0,
+      credit_amount: amount,
+      currency: "USD",
+      exchange_rate: 1.0,
+      reference: journalEntryData.reference,
+    });
+  } else {
+    // If user credited their account, debit Cash account
+    lines.push({
+      tenant_id: tenantId,
+      account_id: cashAccount.id,
+      line_number: 2,
+      description: `Cash inflow from: ${description}`,
+      debit_amount: amount,
+      credit_amount: 0.0,
+      currency: "USD",
+      exchange_rate: 1.0,
+      reference: journalEntryData.reference,
+    });
+  }
+
   const payload = {
     tenant_id: tenantId,
     journal_type_id: journalTypeId,
@@ -497,19 +609,7 @@ export async function createJournalEntry(
     status: "DRAFT", // Initial status
     is_recurring: false,
     is_auto_generated: false,
-    lines: [
-      {
-        tenant_id: tenantId,
-        account_id: accountId, // accountId is directly from journalEntryData.account
-        line_number: 1,
-        description: journalEntryData.description,
-        debit_amount: journalEntryData.debit,
-        credit_amount: journalEntryData.credit,
-        currency: "USD",
-        exchange_rate: 1.0,
-        reference: journalEntryData.reference,
-      },
-    ],
+    lines: lines, // Use the constructed two-line array
   };
 
   try {
@@ -534,6 +634,234 @@ export async function createJournalEntry(
     console.error("Error creating journal entry:", error);
     return null;
   }
+}
+
+// Interface for the data needed to update a journal entry
+export interface UpdateJournalEntryData {
+    date: string;
+    description: string;
+    debit: number;
+    credit: number;
+    account: string; // This is the account ID
+    journal_type_id: string;
+    reference: string;
+}
+
+/**
+ * Updates an existing journal entry.
+ * @param tenantId The ID of the tenant.
+ * @param entryId The ID of the journal entry to update.
+ * @param entryData The data to update the journal entry with.
+ * @returns A promise that resolves to the updated JournalEntryResponseBackend object or null on error.
+ */
+export async function updateJournalEntry(
+  tenantId: string,
+  entryId: string,
+  entryData: UpdateJournalEntryData
+): Promise<JournalEntryResponseBackend | null> {
+  // Ensure account map is populated for converting account name to account ID
+  if (accountMap.size === 0) {
+    await getAccountMap();
+  }
+
+  // Resolve fiscal_period_id from entry date
+  const fiscalPeriodId = await getFiscalPeriodIdByDate(tenantId, entryData.date);
+  if (!fiscalPeriodId) {
+    console.error(`Fiscal period not found for date '${entryData.date}'.`);
+    return null; // Return null for component to handle error
+  }
+
+  // Convert account name to account ID for the primary account
+  const primaryAccountId = accountNameToIdMap.get(entryData.account);
+  if (!primaryAccountId) {
+    console.error(`Account name '${entryData.account}' not found. Cannot update journal entry.`);
+    return null;
+  }
+
+  // Fetch accounts to find a "Cash" or "Bank" account for balancing
+  const allAccounts = await getAccounts(tenantId);
+  if (!allAccounts) {
+    console.error("Failed to fetch accounts for balancing journal entry.");
+    return null;
+  }
+
+  const cashAccount = allAccounts.find(account => 
+    account.name.toLowerCase().includes("cash") || account.name.toLowerCase().includes("bank")
+  );
+
+  if (!cashAccount) {
+    console.error("No suitable 'Cash' or 'Bank' account found for balancing.");
+    // Fallback: Could create a default suspense account or return error
+    return null;
+  }
+
+  const lines = [];
+  const amount = entryData.debit > 0 ? entryData.debit : entryData.credit;
+  const description = entryData.description;
+
+  // First line: User's provided account and amount
+  lines.push({
+    tenant_id: tenantId,
+    account_id: primaryAccountId, // Use the resolved account ID
+    line_number: 1,
+    description: description,
+    debit_amount: entryData.debit,
+    credit_amount: entryData.credit,
+    currency: "USD",
+    exchange_rate: 1.0,
+    reference: entryData.reference,
+  });
+
+  // Second line: Balancing entry to the Cash account
+  if (entryData.debit > 0) {
+    // If user debited their account, credit Cash account
+    lines.push({
+      tenant_id: tenantId,
+      account_id: cashAccount.id,
+      line_number: 2,
+      description: `Cash outflow for: ${description}`,
+      debit_amount: 0.0,
+      credit_amount: amount,
+      currency: "USD",
+      exchange_rate: 1.0,
+      reference: entryData.reference,
+    });
+  } else {
+    // If user credited their account, debit Cash account
+    lines.push({
+      tenant_id: tenantId,
+      account_id: cashAccount.id,
+      line_number: 2,
+      description: `Cash inflow from: ${description}`,
+      debit_amount: amount,
+      credit_amount: 0.0,
+      currency: "USD",
+      exchange_rate: 1.0,
+      reference: entryData.reference,
+    });
+  }
+
+  const payload = {
+    tenant_id: tenantId,
+    journal_type_id: entryData.journal_type_id,
+    fiscal_period_id: fiscalPeriodId,
+    entry_number: `JE-${Date.now()}-UPD`, // Simple unique entry number for update
+    entry_date: entryData.date,
+    description: entryData.description,
+    reference: entryData.reference,
+    source: "Frontend-Edit", // Source of the entry
+    status: "DRAFT", // Status after edit
+    is_recurring: false,
+    is_auto_generated: false,
+    lines: lines, // Use the constructed two-line array
+  };
+
+  try {
+    const response = await fetch(`${BASE_URL}/journal-entries/${entryId}`, {
+      method: "PUT", // Use PUT for updating
+      headers: {
+        "X-API-Key": API_KEY,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error("Failed to update journal entry:", errorText);
+      return null; // Return null for component to handle error
+    }
+
+    const updatedEntry: JournalEntryResponseBackend = await response.json();
+    return updatedEntry;
+  } catch (error) {
+    console.error("Error updating journal entry:", error);
+    return null;
+    }
+}
+
+/**
+ * Rejects a journal entry by updating its status to REVERSED.
+ * @param id The ID of the journal entry to reject.
+ * @returns A promise that resolves to an object indicating success and status, or null on error.
+ */
+export async function rejectJournalEntry(id: string): Promise<JournalEntryResponseBackend | null> {
+    try {
+        // Fetch all journal entries and find the specific one (workaround for missing GET by ID endpoint)
+        const allEntriesResponse = await fetch(`${BASE_URL}/journal-entries?tenant_id=default`, {
+            headers: {
+                "X-API-Key": API_KEY,
+                "Content-Type": "application/json",
+            },
+        });
+
+        if (!allEntriesResponse.ok) {
+            const errorText = await allEntriesResponse.text();
+            console.error(`Failed to fetch all journal entries for rejection:`, errorText);
+            return null;
+        }
+        
+        const allEntries: JournalEntryResponseBackend[] = await allEntriesResponse.json();
+        const entryToUpdate = allEntries.find(entry => entry.id === id);
+
+        if (!entryToUpdate) {
+            console.error(`Journal entry with ID ${id} not found for rejection.`);
+            return null;
+        }
+
+        // Prepare the updated data with status set to "REVERSED"
+        // Construct payload strictly adhering to JournalEntryCreate schema
+        const updatePayload = {
+            tenant_id: entryToUpdate.tenant_id,
+            journal_type_id: entryToUpdate.journal_type_id,
+            fiscal_period_id: entryToUpdate.fiscal_period_id,
+            entry_number: entryToUpdate.entry_number,
+            entry_date: entryToUpdate.entry_date,
+            description: entryToUpdate.description,
+            reference: entryToUpdate.reference,
+            source: entryToUpdate.source,
+            status: "REVERSED", // Set status to REVERSED
+            is_recurring: entryToUpdate.is_recurring,
+            is_auto_generated: entryToUpdate.is_auto_generated,
+            is_adjustment: entryToUpdate.is_adjustment,
+            metadata: entryToUpdate.metadata_,
+            lines: entryToUpdate.lines.map(line => ({
+                tenant_id: entryToUpdate.tenant_id, // Add tenant_id to each line
+                account_id: line.account_id,
+                line_number: line.line_number,
+                description: line.description,
+                debit_amount: line.debit_amount,
+                credit_amount: line.credit_amount,
+                currency: line.currency,
+                exchange_rate: line.exchange_rate,
+                reference: line.reference,
+                dimension1: line.dimension1,
+                dimension2: line.dimension2,
+                metadata: line.metadata_
+            })),
+        };
+        
+        const response = await fetch(`${BASE_URL}/journal-entries/${id}`, {
+            method: "PUT", // Use PUT for full update
+            headers: {
+                "X-API-Key": API_KEY,
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify(updatePayload),
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error(`Failed to reject journal entry ${id}:`, errorText);
+            return null;
+        }
+
+        const updatedEntry: JournalEntryResponseBackend = await response.json();
+        return updatedEntry; // Return the full updated entry
+    } catch (error) {
+        console.error(`Error rejecting journal entry ${id}:`, error);
+        return null;
+    }
 }
 
 /**

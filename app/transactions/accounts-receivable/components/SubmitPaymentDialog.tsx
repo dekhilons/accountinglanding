@@ -67,12 +67,21 @@ const SubmitPaymentDialog: React.FC<SubmitPaymentDialogProps> = ({
               Customer ID
             </Label>
             {/* You might want a Select component here for customer_id */}
-            <Input
-              id="customer_id"
+            <Select
               value={newPayment.customer_id}
-              onChange={(e) => setNewPayment({ ...newPayment, customer_id: e.target.value })}
-              className="col-span-3"
-            />
+              onValueChange={(value) => setNewPayment({ ...newPayment, customer_id: value })}
+            >
+              <SelectTrigger className="col-span-3">
+                <SelectValue placeholder="Select customer" />
+              </SelectTrigger>
+              <SelectContent>
+                {customers.map((customer) => (
+                  <SelectItem key={customer.id} value={customer.id}>
+                    {customer.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
           <div className="grid grid-cols-4 items-center gap-4">
             <Label htmlFor="payment_number" className="text-right">
@@ -122,8 +131,12 @@ const SubmitPaymentDialog: React.FC<SubmitPaymentDialogProps> = ({
             <Input
               id="payment_date"
               type="date"
-              value={newPayment.payment_date}
-              onChange={(e) => setNewPayment({ ...newPayment, payment_date: e.target.value })}
+              value={newPayment.payment_date.split('T')[0]} // Display only the date part for the date input
+              onChange={(e) => {
+                const selectedDate = e.target.value; // This will be in YYYY-MM-DD format
+                // Convert to ISO string for consistency with backend expectation
+                setNewPayment({ ...newPayment, payment_date: new Date(selectedDate).toISOString() });
+              }}
               className="col-span-3"
             />
           </div>
