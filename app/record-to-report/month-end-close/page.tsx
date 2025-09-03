@@ -12,6 +12,8 @@ import { ModalDialog } from "@/components/ui/modal-dialog"
 import { useToast } from "@/hooks/use-toast"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import { ChevronDown } from "lucide-react"
 
 // API Integration Types
 interface GLAccount {
@@ -218,7 +220,6 @@ export default function MonthEndClosePage() {
   const [error, setError] = useState<string | null>(null)
 
   const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false)
-  const [isSelectPeriodModalOpen, setIsSelectPeriodModalOpen] = useState(false)
   const [isViewReportsModalOpen, setIsViewReportsModalOpen] = useState(false)
   const [selectedPeriod, setSelectedPeriod] = useState<ClosePeriod | null>(null)
   const [currentPeriod, setCurrentPeriod] = useState<ClosePeriod | null>(null)
@@ -236,10 +237,10 @@ export default function MonthEndClosePage() {
     loadInitialData()
   }, [])
 
-  // Debug logging for modal state
+  // Debug logging for dropdown state
   useEffect(() => {
-    console.log('Modal state changed - isOpen:', isSelectPeriodModalOpen, 'closePeriods:', closePeriods.length)
-  }, [isSelectPeriodModalOpen, closePeriods])
+    console.log('Dropdown state - currentPeriod:', currentPeriod?.name, 'closePeriods:', closePeriods.length)
+  }, [currentPeriod, closePeriods])
 
   const loadInitialData = async () => {
     try {
@@ -694,7 +695,6 @@ export default function MonthEndClosePage() {
 
   const handleSelectPeriod = (period: ClosePeriod) => {
     setCurrentPeriod(period)
-    setIsSelectPeriodModalOpen(false)
     toast({
       title: "Period Selected",
       description: `You have selected ${period.name} as the current period.`,
@@ -755,10 +755,43 @@ export default function MonthEndClosePage() {
             <p className="text-muted-foreground">Manage and track the month-end close process with integrated GL functionality</p>
           </div>
           <div className="mt-4 sm:mt-0 flex flex-col sm:flex-row gap-2">
-            <Button variant="outline" onClick={() => setIsSelectPeriodModalOpen(true)}>
-              <Calendar className="mr-2 h-4 w-4" />
-              Select Period
-            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" disabled={loading}>
+                  <Calendar className="mr-2 h-4 w-4" />
+                  {currentPeriod ? currentPeriod.name : "Select Period"}
+                  <ChevronDown className="ml-2 h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-64 max-h-80 overflow-y-auto">
+                {loading ? (
+                  <div className="flex items-center justify-center py-4">
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-teal-600"></div>
+                    <span className="ml-2 text-sm text-gray-600">Loading...</span>
+                  </div>
+                ) : closePeriods.length > 0 ? (
+                  closePeriods.map((period) => (
+                    <DropdownMenuItem
+                      key={period.id}
+                      onClick={() => handleSelectPeriod(period)}
+                      className="cursor-pointer"
+                    >
+                      <div className="flex flex-col w-full">
+                        <span className="font-medium">{period.name}</span>
+                        <span className="text-xs text-gray-500">
+                          {new Date(period.startDate).toLocaleDateString()} - {new Date(period.endDate).toLocaleDateString()}
+                        </span>
+                      </div>
+                      <StatusBadge status={period.status} />
+                    </DropdownMenuItem>
+                  ))
+                ) : (
+                  <div className="px-4 py-2 text-sm text-gray-500 text-center">
+                    No periods available
+                  </div>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
             {currentPeriod && (
               <Button
                 className="bg-teal-600 hover:bg-teal-700"
@@ -863,11 +896,7 @@ export default function MonthEndClosePage() {
               <div className="text-center">
                 <Calendar className="h-12 w-12 text-gray-400 mx-auto mb-4" />
                 <h3 className="text-lg font-medium text-gray-900 mb-2">No Period Selected</h3>
-                <p className="text-gray-500 mb-4">Please select a fiscal period to begin the month-end close process.</p>
-                <Button onClick={() => setIsSelectPeriodModalOpen(true)} disabled={loading}>
-                  <Calendar className="mr-2 h-4 w-4" />
-                  Select Period
-                </Button>
+                <p className="text-gray-500 mb-4">Please select a fiscal period from the dropdown above to begin the month-end close process.</p>
               </div>
             </CardContent>
           </Card>
@@ -969,14 +998,7 @@ export default function MonthEndClosePage() {
                             ))}
                           </div>
                         </div>
-                        <div className="flex justify-between">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => handleSelectPeriod(period)}
-                          >
-                            Select Period
-                          </Button>
+                        <div className="flex justify-end">
                           <Button variant="outline" size="sm" onClick={() => setIsViewReportsModalOpen(true)}>
                             <Calendar className="mr-2 h-4 w-4" />
                             View Reports
@@ -1071,49 +1093,6 @@ export default function MonthEndClosePage() {
         )}
       </ModalDialog>
 
-      {/* Select Period Modal */}
-      <ModalDialog
-        title="Select Accounting Period"
-        isOpen={isSelectPeriodModalOpen}
-        onClose={() => setIsSelectPeriodModalOpen(false)}
-        size="md"
-      >
-        <div className="space-y-4">
-          {loading ? (
-            <div className="flex items-center justify-center py-4">
-              <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-teal-600"></div>
-              <span className="ml-2 text-sm text-gray-600">Loading periods...</span>
-            </div>
-          ) : closePeriods.length > 0 ? (
-            closePeriods.map((period) => (
-              <Card
-                key={period.id}
-                className="cursor-pointer hover:bg-gray-50"
-                onClick={() => handleSelectPeriod(period)}
-              >
-                <CardContent className="p-4">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="font-medium">{period.name}</p>
-                      <p className="text-sm text-muted-foreground">
-                        {new Date(period.startDate).toLocaleDateString()} to{" "}
-                        {new Date(period.endDate).toLocaleDateString()}
-                      </p>
-                    </div>
-                    <StatusBadge status={period.status} />
-                  </div>
-                </CardContent>
-              </Card>
-            ))
-          ) : (
-            <div className="text-center py-8">
-              <Calendar className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-              <h3 className="text-lg font-medium text-gray-900 mb-2">No Periods Available</h3>
-              <p className="text-gray-500">No fiscal periods found. Please ensure the GL service is running and configured.</p>
-            </div>
-          )}
-        </div>
-      </ModalDialog>
 
       {/* View Reports Modal */}
       <ModalDialog
