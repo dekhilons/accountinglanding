@@ -41,20 +41,36 @@ export default function TransactionsReconciliationPage() {
   // Real transaction data from API
   const [transactions, setTransactions] = useState<Transaction[]>([])
 
-  // GL accounts (would be fetched from API)
-  const [glAccounts, setGLAccounts] = useState([
-    { value: "cash", label: "Cash" },
-    { value: "accounts-receivable", label: "Accounts Receivable" },
-    { value: "accounts-payable", label: "Accounts Payable" },
-    { value: "sales-revenue", label: "Sales Revenue" },
-    { value: "office-expenses", label: "Office Expenses" },
-    { value: "it-expenses", label: "IT Expenses" },
-    { value: "salaries-wages", label: "Salaries & Wages" },
-    { value: "rent", label: "Rent & Facilities" },
-    { value: "marketing", label: "Marketing & Advertising" },
-    { value: "travel", label: "Travel & Entertainment" },
-    { value: "misc-expenses", label: "Miscellaneous Expenses" },
-  ])
+  // GL accounts fetched from API
+  const [glAccounts, setGLAccounts] = useState<Array<{value: string, label: string, account_type?: string}>>([])
+
+  // Fetch GL accounts from API
+  const fetchGLAccounts = async () => {
+    try {
+      const response = await fetch('http://localhost:8005/api/gl/transactions/gl-accounts?tenant_id=test-tenant')
+      if (!response.ok) {
+        throw new Error('Failed to fetch GL accounts')
+      }
+
+      const data = await response.json()
+      const formattedAccounts = data.map((account: any) => ({
+        value: account.id,
+        label: `${account.account_number} - ${account.name}`,
+        account_type: account.account_type
+      }))
+      setGLAccounts(formattedAccounts)
+    } catch (error) {
+      console.error('Error fetching GL accounts:', error)
+      // Fallback to basic accounts if API fails
+      setGLAccounts([
+        { value: "cash", label: "Cash", account_type: "Asset" },
+        { value: "accounts-receivable", label: "Accounts Receivable", account_type: "Asset" },
+        { value: "accounts-payable", label: "Accounts Payable", account_type: "Liability" },
+        { value: "sales-revenue", label: "Sales Revenue", account_type: "Revenue" },
+        { value: "office-expenses", label: "Office Expenses", account_type: "Expense" },
+      ])
+    }
+  }
 
   // Fetch transactions from API
   const fetchTransactions = async () => {
@@ -84,9 +100,17 @@ export default function TransactionsReconciliationPage() {
     }
   }
 
-  // Load transactions on component mount and when type changes
+  // Load data on component mount
   useEffect(() => {
+    fetchGLAccounts()
     fetchTransactions()
+  }, [])
+
+  // Reload transactions when type changes
+  useEffect(() => {
+    if (selectedType !== 'ALL') {
+      fetchTransactions()
+    }
   }, [selectedType])
 
   // Handle row click to show details and get AI suggestions
@@ -164,7 +188,7 @@ export default function TransactionsReconciliationPage() {
         },
         body: JSON.stringify({
           transaction_type: selectedTransaction.type,
-          gl_account_id: selectedGLAccount,
+          gl_account_id: selectedGLAccount, // This is the actual account ID from API
           gl_account_name: selectedAccount.label
         })
       })
@@ -184,13 +208,14 @@ export default function TransactionsReconciliationPage() {
 
         setIsDetailsModalOpen(false)
       } else {
-        throw new Error('Failed to approve reconciliation')
+        const errorData = await response.json()
+        throw new Error(errorData.detail || 'Failed to approve reconciliation')
       }
     } catch (error) {
       console.error('Error approving match:', error)
       toast({
         title: "Error",
-        description: "Failed to approve reconciliation",
+        description: error instanceof Error ? error.message : "Failed to approve reconciliation",
         variant: "destructive"
       })
     }
