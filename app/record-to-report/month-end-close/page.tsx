@@ -821,11 +821,11 @@ export default function MonthEndClosePage() {
                             <span className="font-medium">{step.name}</span>
                           </div>
                           <div className="flex items-center gap-2">
-                            {step.apiEndpoint && (
+                            {/* {step.apiEndpoint && (
                               <Badge variant="outline" className="text-xs">
                                 API Integrated
                               </Badge>
-                            )}
+                            )} */}
                             <Button
                               size="sm"
                               variant={step.status === "pending" ? "default" : "outline"}
