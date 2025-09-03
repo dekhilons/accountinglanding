@@ -47,7 +47,7 @@ export default function TransactionsReconciliationPage() {
   // Fetch GL accounts from API
   const fetchGLAccounts = async () => {
     try {
-      const response = await fetch('http://localhost:8005/api/gl/transactions/gl-accounts?tenant_id=test-tenant')
+      const response = await fetch('http://localhost:8005/api/gl/transactions/gl-accounts?tenant_id=default')
       if (!response.ok) {
         throw new Error('Failed to fetch GL accounts')
       }
