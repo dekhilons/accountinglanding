@@ -27,26 +27,26 @@ export default function LoginPage() {
     setIsLoading(true)
 
     try {
-      const response = await fetch("/auth/token", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-        },
-        body: new URLSearchParams({
-          username: formData.email,
-          password: formData.password,
-        }).toString(),
-      })
+      // const response = await fetch("/auth/token", {
+      //   method: "POST",
+      //   headers: {
+      //     "Content-Type": "application/x-www-form-urlencoded",
+      //   },
+      //   body: new URLSearchParams({
+      //     username: formData.email,
+      //     password: formData.password,
+      //   }).toString(),
+      // })
 
-      if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.detail || "Login failed")
-      }
+      // if (!response.ok) {
+      //   const errorData = await response.json()
+      //   throw new Error(errorData.detail || "Login failed")
+      // }
 
-      const data = await response.json()
-      localStorage.setItem("access_token", data.access_token)
-      // Store a dummy user object for AppShell to pick up
-      localStorage.setItem("user", JSON.stringify({ email: formData.email, name: "Logged In User" }));
+      // const data = await response.json()
+      // localStorage.setItem("access_token", data.access_token)
+      // // Store a dummy user object for AppShell to pick up
+      // localStorage.setItem("user", JSON.stringify({ email: formData.email, name: "Logged In User" }));
 
       toast({
         title: "Login Successful",
