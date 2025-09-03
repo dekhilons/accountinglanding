@@ -47,7 +47,7 @@ export default function TransactionsReconciliationPage() {
   // Fetch GL accounts from API
   const fetchGLAccounts = async () => {
     try {
-      const response = await fetch('http://localhost:8005/api/gl/transactions/gl-accounts?tenant_id=test-tenant')
+      const response = await fetch('http://localhost:8005/api/gl/transactions/gl-accounts?tenant_id=default')
       if (!response.ok) {
         throw new Error('Failed to fetch GL accounts')
       }
@@ -77,7 +77,7 @@ export default function TransactionsReconciliationPage() {
     setLoading(true)
     try {
       const params = new URLSearchParams({
-        tenant_id: 'test-tenant',
+        tenant_id: 'default',
         ...(selectedType !== 'ALL' && { transaction_type: selectedType })
       })
 
@@ -133,7 +133,7 @@ export default function TransactionsReconciliationPage() {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            tenant_id: 'test-tenant',
+            tenant_id: 'default',
             vendor_name: transaction.type === 'AP_INVOICE' ? transaction.entity_name : undefined,
             customer_name: transaction.type === 'AR_PAYMENT' ? transaction.entity_name : undefined
           })
@@ -256,7 +256,7 @@ export default function TransactionsReconciliationPage() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          tenant_id: 'test-tenant',
+          tenant_id: 'default',
           transactions: selectedTransactions.map(t => ({
             transaction_id: t.id,
             transaction_type: t.type,

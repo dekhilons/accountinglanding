@@ -10,8 +10,9 @@ import { Badge } from "@/components/ui/badge"
 import { ModalDialog } from "@/components/ui/modal-dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useToast } from "@/hooks/use-toast"
+import { useTaxEntries, useTaxCodes, TaxEntry, TaxCode, formatCurrency, formatDate, getStatusColor, getConfidenceColor } from "@/lib/tax-api"
 
-// Define column types
+// Define column types for DataTable compatibility
 type TaxTransaction = {
   id: string
   date: string
@@ -26,91 +27,82 @@ type TaxTransaction = {
 export default function TaxCompliancePage() {
   const { toast } = useToast()
   const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false)
-  const [selectedTransaction, setSelectedTransaction] = useState<TaxTransaction | null>(null)
+  const [selectedEntry, setSelectedEntry] = useState<TaxEntry | null>(null)
   const [selectedTaxCode, setSelectedTaxCode] = useState<string>("")
 
-  // Sample data for tax transactions
-  const taxTransactions: TaxTransaction[] = [
-    {
-      id: "tx-1001",
-      date: "2024-05-20",
-      description: "Office Supplies Purchase",
-      amount: 1250.0,
-      vendor: "Office Supplies Inc.",
-      category: "Office Expenses",
-      taxCode: "EXP-GEN",
-      status: "pending",
-    },
-    {
-      id: "tx-1002",
-      date: "2024-05-18",
-      description: "Software License Renewal",
-      amount: 5000.0,
-      vendor: "Tech Solutions Ltd.",
-      category: "Software Expenses",
-      taxCode: "EXP-TECH",
-      status: "pending",
-    },
-    {
-      id: "tx-1003",
-      date: "2024-05-15",
-      description: "Client Entertainment",
-      amount: 350.75,
-      vendor: "Fine Dining Restaurant",
-      category: "Entertainment",
-      taxCode: "EXP-ENT",
-      status: "flagged",
-    },
-    {
-      id: "tx-1004",
-      date: "2024-05-12",
-      description: "Marketing Services",
-      amount: 7500.0,
-      vendor: "Marketing Agency Co.",
-      category: "Marketing Expenses",
-      taxCode: "EXP-MKT",
-      status: "approved",
-    },
-    {
-      id: "tx-1005",
-      date: "2024-05-10",
-      description: "International Vendor Payment",
-      amount: 12500.0,
-      vendor: "Global Suppliers Ltd.",
-      category: "Inventory",
-      taxCode: "PENDING",
-      status: "pending",
-    },
-  ]
+  // Use API hooks
+  const { taxEntries, loading: entriesLoading, error: entriesError, updateStatus } = useTaxEntries()
+  const { taxCodes, loading: codesLoading, error: codesError } = useTaxCodes()
 
-  // Sample tax codes
-  const taxCodes = [
-    { value: "EXP-GEN", label: "General Expenses (Fully Deductible)" },
-    { value: "EXP-TECH", label: "Technology Expenses (Fully Deductible)" },
-    { value: "EXP-MKT", label: "Marketing Expenses (Fully Deductible)" },
-    { value: "EXP-ENT", label: "Entertainment (50% Deductible)" },
-    { value: "EXP-MEAL", label: "Meals (50% Deductible)" },
-    { value: "EXP-TRVL", label: "Travel Expenses (Fully Deductible)" },
-    { value: "CAP-ASSET", label: "Capital Asset (Depreciable)" },
-    { value: "NON-DED", label: "Non-Deductible Expense" },
-  ]
+  // Convert TaxEntry to TaxTransaction format for compatibility
+  const taxTransactions: TaxTransaction[] = taxEntries.map(entry => ({
+    id: entry.entry_id,
+    date: entry.created_at,
+    description: `Transaction ${entry.txn_id}`,
+    amount: entry.amount,
+    vendor: entry.vendor_customer_id || "Unknown Vendor",
+    category: entry.account_code,
+    taxCode: entry.tax_code,
+    status: entry.status === "PENDING_APPROVAL" ? "pending" :
+            entry.status === "APPLIED" ? "approved" : "flagged"
+  }))
 
   // Handle row click to show details
   const handleRowClick = (transaction: TaxTransaction) => {
-    setSelectedTransaction(transaction)
-    setSelectedTaxCode(transaction.taxCode !== "PENDING" ? transaction.taxCode : "")
-    setIsDetailsModalOpen(true)
+    // Find the corresponding TaxEntry
+    const entry = taxEntries.find(e => e.entry_id === transaction.id)
+    if (entry) {
+      setSelectedEntry(entry)
+      setSelectedTaxCode(entry.tax_code)
+      setIsDetailsModalOpen(true)
+    }
   }
 
   // Handle approve tax code
-  const handleApproveTaxCode = () => {
-    if (!selectedTransaction || !selectedTaxCode) return
+  const handleApproveTaxCode = async () => {
+    if (!selectedEntry || !selectedTaxCode) {
+      toast({
+        title: "Validation Error",
+        description: "Please select a tax code before approving.",
+        variant: "destructive",
+      })
+      return
+    }
 
-    toast({
-      title: "Tax Code Approved",
-      description: `Tax code ${selectedTaxCode} has been assigned to transaction ${selectedTransaction.id}.`,
-    })
-    setIsDetailsModalOpen(false)
+    // Business logic validation
+    if (selectedEntry.status === "APPLIED") {
+      toast({
+        title: "Validation Error",
+        description: "This tax entry has already been applied.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    if (selectedEntry.status === "REJECTED") {
+      toast({
+        title: "Validation Error",
+        description: "Cannot approve a rejected tax entry.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    try {
+      await updateStatus(selectedEntry.entry_id, "APPLIED")
+      toast({
+        title: "Tax Code Approved",
+        description: `Tax code ${selectedTaxCode} has been assigned to transaction ${selectedEntry.txn_id}.`,
+      })
+      setIsDetailsModalOpen(false)
+      setSelectedEntry(null)
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to approve tax code. Please try again.",
+        variant: "destructive",
+      })
+    }
   }
 
   // Status badge component
@@ -133,7 +125,7 @@ export default function TaxCompliancePage() {
       accessorKey: "date",
       header: "Date",
       cell: ({ row }: any) => {
-        return new Date(row.getValue("date")).toLocaleDateString()
+        return formatDate(row.getValue("date"))
       },
     },
     {
@@ -144,11 +136,7 @@ export default function TaxCompliancePage() {
       accessorKey: "amount",
       header: "Amount",
       cell: ({ row }: any) => {
-        const amount = Number.parseFloat(row.getValue("amount"))
-        return new Intl.NumberFormat("en-US", {
-          style: "currency",
-          currency: "USD",
-        }).format(amount)
+        return formatCurrency(Number.parseFloat(row.getValue("amount")))
       },
     },
     {
@@ -157,24 +145,82 @@ export default function TaxCompliancePage() {
     },
     {
       accessorKey: "category",
-      header: "Category",
+      header: "Account Code",
     },
     {
       accessorKey: "taxCode",
       header: "Tax Code",
       cell: ({ row }: any) => {
         const taxCode = row.getValue("taxCode")
-        return taxCode === "PENDING" ? <Badge className="bg-amber-100 text-amber-800">Pending</Badge> : taxCode
+        return <Badge className={getStatusColor("pending")}>{taxCode}</Badge>
       },
     },
     {
       accessorKey: "status",
       header: "Status",
       cell: ({ row }: any) => {
-        return <StatusBadge status={row.getValue("status")} />
+        const status = row.getValue("status")
+        return <Badge className={getStatusColor(status)}>{status.replace('_', ' ')}</Badge>
       },
     },
   ]
+
+  // Show loading state
+  if (entriesLoading || codesLoading) {
+    return (
+      <AppShell>
+        <div className="space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h1 className="text-2xl font-bold tracking-tight">Tax & Compliance</h1>
+              <p className="text-muted-foreground">Manage tax codes and ensure compliance with tax regulations</p>
+            </div>
+          </div>
+          <Card>
+            <CardContent className="flex items-center justify-center h-64">
+              <div className="text-center">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 mx-auto"></div>
+                <p className="mt-2 text-sm text-gray-600">Loading tax entries...</p>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </AppShell>
+    )
+  }
+
+  // Show error state
+  if (entriesError || codesError) {
+    return (
+      <AppShell>
+        <div className="space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h1 className="text-2xl font-bold tracking-tight">Tax & Compliance</h1>
+              <p className="text-muted-foreground">Manage tax codes and ensure compliance with tax regulations</p>
+            </div>
+          </div>
+          <Card>
+            <CardContent className="flex items-center justify-center h-64">
+              <div className="text-center">
+                <AlertCircle className="h-8 w-8 text-red-500 mx-auto mb-2" />
+                <p className="text-sm text-red-600">
+                  {entriesError?.message || codesError?.message || "Failed to load data"}
+                </p>
+                <Button
+                  onClick={() => window.location.reload()}
+                  className="mt-4"
+                  variant="outline"
+                >
+                  Retry
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </AppShell>
+    )
+  }
 
   return (
     <AppShell>
@@ -200,7 +246,7 @@ export default function TaxCompliancePage() {
         <Card>
           <CardHeader>
             <CardTitle>Tax Code Assignment</CardTitle>
-            <CardDescription>Review and assign tax codes to transactions</CardDescription>
+            <CardDescription>Review and assign tax codes to transactions ({taxEntries.length} entries)</CardDescription>
           </CardHeader>
           <CardContent>
             <DataTable
@@ -223,63 +269,69 @@ export default function TaxCompliancePage() {
         cancelText="Cancel"
         size="lg"
       >
-        {selectedTransaction && (
+        {selectedEntry && (
           <div className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <h3 className="text-sm font-medium text-gray-500">Date</h3>
-                <p className="mt-1">{new Date(selectedTransaction.date).toLocaleDateString()}</p>
+                <p className="mt-1">{formatDate(selectedEntry.created_at)}</p>
               </div>
               <div>
                 <h3 className="text-sm font-medium text-gray-500">Amount</h3>
-                <p className="mt-1">
-                  {new Intl.NumberFormat("en-US", {
-                    style: "currency",
-                    currency: "USD",
-                  }).format(selectedTransaction.amount)}
-                </p>
+                <p className="mt-1">{formatCurrency(selectedEntry.amount)}</p>
               </div>
               <div className="md:col-span-2">
-                <h3 className="text-sm font-medium text-gray-500">Description</h3>
-                <p className="mt-1">{selectedTransaction.description}</p>
+                <h3 className="text-sm font-medium text-gray-500">Transaction ID</h3>
+                <p className="mt-1">{selectedEntry.txn_id}</p>
               </div>
               <div>
-                <h3 className="text-sm font-medium text-gray-500">Vendor</h3>
-                <p className="mt-1">{selectedTransaction.vendor}</p>
+                <h3 className="text-sm font-medium text-gray-500">Vendor/Customer</h3>
+                <p className="mt-1">{selectedEntry.vendor_customer_id || "N/A"}</p>
               </div>
               <div>
-                <h3 className="text-sm font-medium text-gray-500">Category</h3>
-                <p className="mt-1">{selectedTransaction.category}</p>
+                <h3 className="text-sm font-medium text-gray-500">Account Code</h3>
+                <p className="mt-1">{selectedEntry.account_code}</p>
               </div>
               <div>
                 <h3 className="text-sm font-medium text-gray-500">Current Tax Code</h3>
                 <div className="mt-1">
-                  {selectedTransaction.taxCode === "PENDING" ? (
-                    <Badge className="bg-amber-100 text-amber-800">Pending Assignment</Badge>
-                  ) : (
-                    selectedTransaction.taxCode
-                  )}
+                  <Badge className={getStatusColor(selectedEntry.status)}>
+                    {selectedEntry.tax_code}
+                  </Badge>
+                </div>
+              </div>
+              <div>
+                <h3 className="text-sm font-medium text-gray-500">Confidence</h3>
+                <div className="mt-1">
+                  <span className={getConfidenceColor(selectedEntry.confidence)}>
+                    {(selectedEntry.confidence * 100).toFixed(1)}%
+                  </span>
                 </div>
               </div>
               <div>
                 <h3 className="text-sm font-medium text-gray-500">Status</h3>
                 <div className="mt-1">
-                  <StatusBadge status={selectedTransaction.status} />
+                  <Badge className={getStatusColor(selectedEntry.status)}>
+                    {selectedEntry.status.replace('_', ' ')}
+                  </Badge>
                 </div>
+              </div>
+              <div>
+                <h3 className="text-sm font-medium text-gray-500">Region</h3>
+                <p className="mt-1">{selectedEntry.region}</p>
               </div>
             </div>
 
-            {selectedTransaction.status === "flagged" && (
+            {selectedEntry.status === "PENDING_APPROVAL" && selectedEntry.confidence < 0.85 && (
               <div className="border-t border-gray-200 pt-4">
-                <div className="bg-red-50 border border-red-200 rounded-md p-4">
+                <div className="bg-amber-50 border border-amber-200 rounded-md p-4">
                   <div className="flex items-start">
-                    <AlertCircle className="h-5 w-5 text-red-600 mt-0.5 mr-2" />
+                    <AlertCircle className="h-5 w-5 text-amber-600 mt-0.5 mr-2" />
                     <div>
-                      <h3 className="font-medium text-red-800">Compliance Flag</h3>
-                      <p className="text-sm text-red-700 mt-1">
-                        This transaction has been flagged for review due to potential entertainment expense
-                        restrictions. Please ensure proper documentation is attached and the correct tax code is
-                        assigned.
+                      <h3 className="font-medium text-amber-800">Low Confidence</h3>
+                      <p className="text-sm text-amber-700 mt-1">
+                        This tax code assignment has low confidence and requires manual review.
+                        Please verify the tax code is correct before approving.
                       </p>
                     </div>
                   </div>
