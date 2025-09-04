@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { useToast } from "@/hooks/use-toast"
+import { login } from "@/lib/auth"
 
 export default function LoginPage() {
   const router = useRouter()
@@ -27,30 +28,14 @@ export default function LoginPage() {
     setIsLoading(true)
 
     try {
-      // const response = await fetch("/auth/token", {
-      //   method: "POST",
-      //   headers: {
-      //     "Content-Type": "application/x-www-form-urlencoded",
-      //   },
-      //   body: new URLSearchParams({
-      //     username: formData.email,
-      //     password: formData.password,
-      //   }).toString(),
-      // })
-
-      // if (!response.ok) {
-      //   const errorData = await response.json()
-      //   throw new Error(errorData.detail || "Login failed")
-      // }
-
-      // const data = await response.json()
-      // localStorage.setItem("access_token", data.access_token)
-      // // Store a dummy user object for AppShell to pick up
-      // localStorage.setItem("user", JSON.stringify({ email: formData.email, name: "Logged In User" }));
+      const data = await login({
+        email: formData.email,
+        password: formData.password,
+      })
 
       toast({
         title: "Login Successful",
-        description: "Welcome back! Redirecting to dashboard...",
+        description: `Welcome back, ${data.user.name}! Redirecting to dashboard...`,
       })
 
       router.push("/dashboard")

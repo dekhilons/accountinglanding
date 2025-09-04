@@ -12,6 +12,7 @@ import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useToast } from "@/hooks/use-toast"
+import { register } from "@/lib/auth"
 
 export default function SignupPage() {
   const router = useRouter()
@@ -20,13 +21,15 @@ export default function SignupPage() {
   const [showPassword, setShowPassword] = useState(false)
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
   const [formData, setFormData] = useState({
-    firstName: "",
-    lastName: "",
+    name: "",
     email: "",
-    company: "",
-    role: "",
+    department: "",
+    phone: "",
+    job_title: "",
+    employee_id: "",
     password: "",
     confirmPassword: "",
+    tenant_id: "550e8400-e29b-41d4-a716-446655440000", // Default tenant ID
   })
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -45,34 +48,24 @@ export default function SignupPage() {
     }
 
     try {
-      const response = await fetch("/auth/register", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          email: formData.email,
-          password: formData.password,
-          first_name: formData.firstName,
-          last_name: formData.lastName,
-          company: formData.company,
-          role: formData.role,
-        }),
+      const data = await register({
+        email: formData.email,
+        name: formData.name,
+        password: formData.password,
+        department: formData.department,
+        phone: formData.phone,
+        job_title: formData.job_title,
+        employee_id: formData.employee_id,
+        tenant_id: formData.tenant_id,
       })
-
-      if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.detail || "Account creation failed")
-      }
 
       toast({
         title: "Account Created",
-        description: "Welcome to AccountingAI! Redirecting to dashboard...",
+        description: `Welcome to AccountingAI, ${data.name}! Please wait for admin approval.`,
       })
 
-      // After successful registration, you might want to automatically log the user in
-      // or redirect them to the login page. For simplicity, we'll redirect to dashboard.
-      router.push("/dashboard")
+      // Redirect to login page after successful registration
+      router.push("/auth/login")
     } catch (error: any) {
       toast({
         title: "Signup Failed",
@@ -110,33 +103,18 @@ export default function SignupPage() {
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit} className="space-y-6">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label htmlFor="firstName">First name</Label>
-                  <Input
-                    id="firstName"
-                    name="firstName"
-                    type="text"
-                    required
-                    value={formData.firstName}
-                    onChange={(e) => setFormData({ ...formData, firstName: e.target.value })}
-                    placeholder="John"
-                    className="mt-1"
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="lastName">Last name</Label>
-                  <Input
-                    id="lastName"
-                    name="lastName"
-                    type="text"
-                    required
-                    value={formData.lastName}
-                    onChange={(e) => setFormData({ ...formData, lastName: e.target.value })}
-                    placeholder="Doe"
-                    className="mt-1"
-                  />
-                </div>
+              <div>
+                <Label htmlFor="name">Full Name</Label>
+                <Input
+                  id="name"
+                  name="name"
+                  type="text"
+                  required
+                  value={formData.name}
+                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  placeholder="John Doe"
+                  className="mt-1"
+                />
               </div>
 
               <div>
@@ -155,33 +133,56 @@ export default function SignupPage() {
               </div>
 
               <div>
-                <Label htmlFor="company">Company</Label>
+                <Label htmlFor="department">Department</Label>
                 <Input
-                  id="company"
-                  name="company"
+                  id="department"
+                  name="department"
                   type="text"
-                  value={formData.company}
-                  onChange={(e) => setFormData({ ...formData, company: e.target.value })}
-                  placeholder="Your Company Inc."
+                  value={formData.department}
+                  onChange={(e) => setFormData({ ...formData, department: e.target.value })}
+                  placeholder="IT, Finance, Operations, etc."
                   className="mt-1"
                 />
               </div>
 
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label htmlFor="phone">Phone</Label>
+                  <Input
+                    id="phone"
+                    name="phone"
+                    type="tel"
+                    value={formData.phone}
+                    onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                    placeholder="+1-555-0123"
+                    className="mt-1"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="employee_id">Employee ID</Label>
+                  <Input
+                    id="employee_id"
+                    name="employee_id"
+                    type="text"
+                    value={formData.employee_id}
+                    onChange={(e) => setFormData({ ...formData, employee_id: e.target.value })}
+                    placeholder="EMP001"
+                    className="mt-1"
+                  />
+                </div>
+              </div>
+
               <div>
-                <Label htmlFor="role">Role</Label>
-                <Select value={formData.role} onValueChange={(value) => setFormData({ ...formData, role: value })}>
-                  <SelectTrigger className="mt-1">
-                    <SelectValue placeholder="Select your role" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="cfo">CFO</SelectItem>
-                    <SelectItem value="controller">Controller</SelectItem>
-                    <SelectItem value="accountant">Accountant</SelectItem>
-                    <SelectItem value="bookkeeper">Bookkeeper</SelectItem>
-                    <SelectItem value="analyst">Financial Analyst</SelectItem>
-                    <SelectItem value="other">Other</SelectItem>
-                  </SelectContent>
-                </Select>
+                <Label htmlFor="job_title">Job Title</Label>
+                <Input
+                  id="job_title"
+                  name="job_title"
+                  type="text"
+                  value={formData.job_title}
+                  onChange={(e) => setFormData({ ...formData, job_title: e.target.value })}
+                  placeholder="Software Engineer"
+                  className="mt-1"
+                />
               </div>
 
               <div>
