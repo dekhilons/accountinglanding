@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Download, FileText, Calendar, DollarSign, ArrowRight } from "lucide-react"
 import { AppShell } from "@/components/layout/app-shell"
 import { Button } from "@/components/ui/button"
@@ -28,53 +28,158 @@ export default function TreasuryOperationsPage() {
   const { toast } = useToast()
   const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false)
   const [isTransferModalOpen, setIsTransferModalOpen] = useState(false)
+  const [isTermsModalOpen, setIsTermsModalOpen] = useState(false) // New state for terms modal
+  const [termsContent, setTermsContent] = useState<string>("") // New state for terms content
   const [selectedCreditLine, setSelectedCreditLine] = useState<CreditLine | null>(null)
   const [transferAmount, setTransferAmount] = useState("")
   const [transferAccount, setTransferAccount] = useState("")
+  const [rowSelection, setRowSelection] = useState({}) // Add rowSelection state
+  const [creditLines, setCreditLines] = useState<CreditLine[]>([])
+  const [loading, setLoading] = useState(true)
+  const [isAddCreditLineModalOpen, setIsAddCreditLineModalOpen] = useState(false)
+  const [newCreditLine, setNewCreditLine] = useState<Omit<CreditLine, "id" | "createdAt" | "updatedAt">>({
+    name: "",
+    type: "line-of-credit", // Default type
+    limit: 0,
+    balance: 0,
+    rate: 0,
+    dueDate: new Date().toISOString().split("T")[0], // Default to today's date
+    status: "active", // Default status
+  })
 
-  // Sample data for credit lines
-  const creditLines: CreditLine[] = [
-    {
-      id: "cl-1001",
-      name: "Primary Line of Credit",
-      type: "line-of-credit",
-      limit: 250000,
-      balance: 0,
-      rate: 7.5,
-      dueDate: "2025-12-31",
-      status: "active",
-    },
-    {
-      id: "cl-1002",
-      name: "Equipment Term Loan",
-      type: "term-loan",
-      limit: 100000,
-      balance: 75000,
-      rate: 6.25,
-      dueDate: "2027-06-30",
-      status: "active",
-    },
-    {
-      id: "cl-1003",
-      name: "Corporate Credit Card",
-      type: "credit-card",
-      limit: 50000,
-      balance: 12500,
-      rate: 18.99,
-      dueDate: "2024-06-15",
-      status: "active",
-    },
-    {
-      id: "cl-1004",
-      name: "Secondary Line of Credit",
-      type: "line-of-credit",
-      limit: 100000,
-      balance: 0,
-      rate: 8.0,
-      dueDate: "2025-06-30",
-      status: "inactive",
-    },
-  ]
+  // Handle export to CSV
+  const handleExport = () => {
+    if (creditLines.length === 0) {
+      toast({
+        title: "No Data to Export",
+        description: "There are no credit lines to export.",
+        variant: "default"
+      })
+      return
+    }
+
+    const headers = ["ID", "Name", "Type", "Limit", "Balance", "Interest Rate", "Due Date", "Status"]
+    const rows = creditLines.map(line => [
+      line.id,
+      line.name,
+      line.type,
+      line.limit,
+      line.balance,
+      line.rate,
+      line.dueDate,
+      line.status
+    ])
+
+    const csvContent = [
+      headers.join(","),
+      ...rows.map(row => row.join(","))
+    ].join("\n")
+
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" })
+    const link = document.createElement("a")
+    if (link.download !== undefined) { // Feature detection for download attribute
+      const url = URL.createObjectURL(blob)
+      link.setAttribute("href", url)
+      link.setAttribute("download", "credit_lines.csv")
+      link.style.visibility = "hidden"
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      URL.revokeObjectURL(url)
+      toast({
+        title: "Export Successful",
+        description: "Credit lines exported to credit_lines.csv",
+      })
+    } else {
+      toast({
+        title: "Export Failed",
+        description: "Your browser does not support downloading files directly.",
+        variant: "destructive"
+      })
+    }
+  }
+
+  // Handle adding a new credit line
+  const handleAddCreditLine = async () => {
+    try {
+      const response = await fetch('http://localhost:8004/treasury/credit-lines', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          ...newCreditLine,
+          tenantId: 'default_tenant_id', // Assuming a default tenant_id
+        }),
+      })
+
+      if (response.ok) {
+        const result = await response.json()
+        toast({
+          title: "Credit Line Added",
+          description: result.message,
+        })
+        setIsAddCreditLineModalOpen(false)
+        // Reset form
+        setNewCreditLine({
+          name: "",
+          type: "line-of-credit",
+          limit: 0,
+          balance: 0,
+          rate: 0,
+          dueDate: new Date().toISOString().split("T")[0],
+          status: "active",
+        })
+        // Refresh credit lines
+        const refreshResponse = await fetch('http://localhost:8004/treasury/credit-lines?tenant_id=default_tenant_id')
+        if (refreshResponse.ok) {
+          const data = await refreshResponse.json()
+          setCreditLines(data)
+        }
+      } else {
+        const error = await response.json()
+        toast({
+          title: "Error",
+          description: error.detail || "Failed to add credit line",
+          variant: "destructive"
+        })
+      }
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to add credit line",
+        variant: "destructive"
+      })
+    }
+  }
+
+  // Fetch credit lines from API
+  useEffect(() => {
+    const fetchCreditLines = async () => {
+      try {
+        const response = await fetch('http://localhost:8004/treasury/credit-lines?tenant_id=default_tenant_id')
+        if (response.ok) {
+          const data = await response.json()
+          setCreditLines(data)
+        } else {
+          toast({
+            title: "Error",
+            description: "Failed to fetch credit lines",
+            variant: "destructive"
+          })
+        }
+      } catch (error) {
+        toast({
+          title: "Error",
+          description: "Failed to fetch credit lines",
+          variant: "destructive"
+        })
+      } finally {
+        setLoading(false)
+      }
+    }
+    fetchCreditLines()
+  }, [toast])
 
   // Sample bank accounts
   const bankAccounts = [
@@ -97,15 +202,53 @@ export default function TreasuryOperationsPage() {
   }
 
   // Handle confirm transfer
-  const handleConfirmTransfer = () => {
-    toast({
-      title: "Transfer Scheduled",
-      description: `A transfer of ${new Intl.NumberFormat("en-US", {
-        style: "currency",
-        currency: "USD",
-      }).format(Number(transferAmount))} has been scheduled.`,
-    })
-    setIsTransferModalOpen(false)
+  const handleConfirmTransfer = async () => {
+    if (!selectedCreditLine || !transferAmount || !transferAccount) return
+
+    try {
+      const response = await fetch('http://localhost:8004/treasury/schedule-transfer', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          credit_line_id: selectedCreditLine.id,
+          tenant_id: 'default_tenant_id',
+          amount: parseFloat(transferAmount),
+          account_id: transferAccount,
+        }),
+      })
+
+      if (response.ok) {
+        const result = await response.json()
+        toast({
+          title: "Transfer Scheduled",
+          description: result.message,
+        })
+        setIsTransferModalOpen(false)
+        setTransferAmount("")
+        setTransferAccount("")
+        // Refresh credit lines
+        const refreshResponse = await fetch('http://localhost:8004/treasury/credit-lines?tenant_id=default_tenant_id')
+        if (refreshResponse.ok) {
+          const data = await refreshResponse.json()
+          setCreditLines(data)
+        }
+      } else {
+        const error = await response.json()
+        toast({
+          title: "Error",
+          description: error.detail || "Failed to schedule transfer",
+          variant: "destructive"
+        })
+      }
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to schedule transfer",
+        variant: "destructive"
+      })
+    }
   }
 
   // Status badge component
@@ -202,11 +345,11 @@ export default function TreasuryOperationsPage() {
             <p className="text-muted-foreground">Manage credit lines, debt instruments, and transfers</p>
           </div>
           <div className="mt-4 sm:mt-0 flex flex-col sm:flex-row gap-2">
-            <Button variant="outline">
+            <Button variant="outline" onClick={handleExport}>
               <Download className="mr-2 h-4 w-4" />
               Export
             </Button>
-            <Button className="bg-teal-600 hover:bg-teal-700">
+            <Button className="bg-teal-600 hover:bg-teal-700" onClick={() => setIsAddCreditLineModalOpen(true)}>
               <DollarSign className="mr-2 h-4 w-4" />
               New Credit Line
             </Button>
@@ -220,7 +363,20 @@ export default function TreasuryOperationsPage() {
             <CardDescription>Manage your company's credit facilities and debt</CardDescription>
           </CardHeader>
           <CardContent>
-            <DataTable columns={columns} data={creditLines} searchColumn="name" onRowClick={handleRowClick} />
+            {loading ? (
+              <div className="flex justify-center items-center h-32">
+                <div className="text-muted-foreground">Loading credit lines...</div>
+              </div>
+            ) : (
+              <DataTable
+                columns={columns}
+                data={creditLines}
+                searchColumn="name"
+                onRowClick={handleRowClick}
+                rowSelection={rowSelection} // Pass rowSelection
+                onRowSelectionChange={setRowSelection} // Pass onRowSelectionChange
+              />
+            )}
           </CardContent>
         </Card>
       </div>
@@ -309,7 +465,35 @@ export default function TreasuryOperationsPage() {
             </div>
 
             <div className="border-t border-gray-200 pt-4 flex justify-between">
-              <Button variant="outline">
+              <Button
+                variant="outline"
+                onClick={async () => {
+                  if (selectedCreditLine) {
+                    try {
+                      const response = await fetch(
+                        `http://localhost:8004/treasury/credit-lines/${selectedCreditLine.id}/terms?tenant_id=default_tenant_id`
+                      )
+                      if (response.ok) {
+                        const data = await response.json()
+                        setTermsContent(data.terms)
+                        setIsTermsModalOpen(true)
+                      } else {
+                        toast({
+                          title: "Error",
+                          description: "Failed to fetch terms",
+                          variant: "destructive",
+                        })
+                      }
+                    } catch (error) {
+                      toast({
+                        title: "Error",
+                        description: "Failed to fetch terms",
+                        variant: "destructive",
+                      })
+                    }
+                  }
+                }}
+              >
                 <FileText className="mr-2 h-4 w-4" />
                 View Terms
               </Button>
@@ -326,6 +510,15 @@ export default function TreasuryOperationsPage() {
             </div>
           </div>
         )}
+      </ModalDialog>
+
+      {/* View Terms Modal */}
+      <ModalDialog
+        title={`Terms for ${selectedCreditLine?.name}`}
+        isOpen={isTermsModalOpen}
+        onClose={() => setIsTermsModalOpen(false)}
+      >
+        <p className="whitespace-pre-wrap">{termsContent}</p>
       </ModalDialog>
 
       {/* Schedule Transfer Modal */}
@@ -406,6 +599,94 @@ export default function TreasuryOperationsPage() {
             </div>
           </div>
         )}
+      </ModalDialog>
+
+      {/* Add Credit Line Modal */}
+      <ModalDialog
+        title="Add New Credit Line"
+        description="Enter the details for the new credit line"
+        isOpen={isAddCreditLineModalOpen}
+        onClose={() => setIsAddCreditLineModalOpen(false)}
+        onConfirm={handleAddCreditLine}
+        confirmText="Add Credit Line"
+        cancelText="Cancel"
+      >
+        <div className="space-y-4">
+          <div>
+            <label className="text-sm font-medium mb-2 block">Name</label>
+            <Input
+              value={newCreditLine.name}
+              onChange={(e) => setNewCreditLine({ ...newCreditLine, name: e.target.value })}
+              placeholder="e.g., Business Loan, Revolving Credit"
+            />
+          </div>
+          <div>
+            <label className="text-sm font-medium mb-2 block">Type</label>
+            <Select
+              value={newCreditLine.type}
+              onValueChange={(value) => setNewCreditLine({ ...newCreditLine, type: value as "line-of-credit" | "term-loan" | "credit-card" })}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select type" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="line-of-credit">Line of Credit</SelectItem>
+                <SelectItem value="term-loan">Term Loan</SelectItem>
+                <SelectItem value="credit-card">Credit Card</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <label className="text-sm font-medium mb-2 block">Credit Limit</label>
+            <Input
+              type="number"
+              value={newCreditLine.limit}
+              onChange={(e) => setNewCreditLine({ ...newCreditLine, limit: parseFloat(e.target.value) })}
+              placeholder="e.g., 100000"
+            />
+          </div>
+          <div>
+            <label className="text-sm font-medium mb-2 block">Current Balance</label>
+            <Input
+              type="number"
+              value={newCreditLine.balance}
+              onChange={(e) => setNewCreditLine({ ...newCreditLine, balance: parseFloat(e.target.value) })}
+              placeholder="e.g., 50000"
+            />
+          </div>
+          <div>
+            <label className="text-sm font-medium mb-2 block">Interest Rate (%)</label>
+            <Input
+              type="number"
+              value={newCreditLine.rate}
+              onChange={(e) => setNewCreditLine({ ...newCreditLine, rate: parseFloat(e.target.value) })}
+              placeholder="e.g., 4.5"
+            />
+          </div>
+          <div>
+            <label className="text-sm font-medium mb-2 block">Due Date</label>
+            <Input
+              type="date"
+              value={newCreditLine.dueDate}
+              onChange={(e) => setNewCreditLine({ ...newCreditLine, dueDate: e.target.value })}
+            />
+          </div>
+          <div>
+            <label className="text-sm font-medium mb-2 block">Status</label>
+            <Select
+              value={newCreditLine.status}
+              onValueChange={(value) => setNewCreditLine({ ...newCreditLine, status: value as "active" | "inactive" })}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="active">Active</SelectItem>
+                <SelectItem value="inactive">Inactive</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
       </ModalDialog>
     </AppShell>
   )

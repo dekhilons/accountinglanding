@@ -1,7 +1,7 @@
 "use client"
 
-import { useState } from "react"
-import { Filter, Download, AlertCircle } from "lucide-react"
+import { useState, useMemo } from "react"
+import { Filter, Download, AlertCircle, Search, CalendarDays, TrendingUp, BarChart, Clock, ListChecks, FileText, CheckCircle, XCircle, MinusCircle } from "lucide-react"
 import { AppShell } from "@/components/layout/app-shell"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -9,8 +9,28 @@ import { DataTable } from "@/components/ui/data-table"
 import { Badge } from "@/components/ui/badge"
 import { ModalDialog } from "@/components/ui/modal-dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { useToast } from "@/hooks/use-toast"
-import { useTaxEntries, useTaxCodes, TaxEntry, TaxCode, formatCurrency, formatDate, getStatusColor, getConfidenceColor } from "@/lib/tax-api"
+import {
+  useTaxEntries,
+  useTaxCodes,
+  useTaxProvisions,
+  triggerAPI,
+  TaxEntry,
+  TaxCode,
+  TaxProvision,
+  GlCompletedEvent,
+  GlPeriodClosedEvent,
+  formatCurrency,
+  formatDate,
+  getStatusColor,
+  getConfidenceColor
+} from "@/lib/tax-api"
+import { Checkbox } from "@/components/ui/checkbox" // Corrected import location
+import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip, BarChart as RechartsBarChart, XAxis, YAxis, CartesianGrid, Legend, Bar } from 'recharts';
+import { Progress } from "@/components/ui/progress";
 
 // Define column types for DataTable compatibility
 type TaxTransaction = {
@@ -21,7 +41,14 @@ type TaxTransaction = {
   vendor: string
   category: string
   taxCode: string
-  status: "pending" | "approved" | "flagged"
+  status: "pending" | "approved" | "flagged" // These are frontend display statuses
+}
+
+type TaxProvisionDisplay = {
+  id: string
+  period: string
+  amount: number
+  status: "pending" | "approved" | "flagged" // Frontend display statuses
 }
 
 export default function TaxCompliancePage() {
@@ -29,27 +56,174 @@ export default function TaxCompliancePage() {
   const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false)
   const [selectedEntry, setSelectedEntry] = useState<TaxEntry | null>(null)
   const [selectedTaxCode, setSelectedTaxCode] = useState<string>("")
+  const [selectedEntryIds, setSelectedEntryIds] = useState<Record<string, boolean>>({});
+
+  const [isProvisionDetailsModalOpen, setIsProvisionDetailsModalOpen] = useState(false)
+  const [selectedProvision, setSelectedProvision] = useState<TaxProvision | null>(null)
+  const [selectedProvisionIds, setSelectedProvisionIds] = useState<Record<string, boolean>>({});
+
+  // State for filter modal
+  const [isFilterModalOpen, setIsFilterModalOpen] = useState(false)
+  const [filterStatus, setFilterStatus] = useState<string>("all")
+  const [filterTaxCode, setFilterTaxCode] = useState<string>("all")
+  const [filterPeriod, setFilterPeriod] = useState<string>("all")
+  const [currentTab, setCurrentTab] = useState("tax-entries"); // State to track active tab
+
+  // State for agent trigger forms
+  const [txnId, setTxnId] = useState("")
+  const [accountCode, setAccountCode] = useState("")
+  const [amount, setAmount] = useState<number | ''>("")
+  const [vendorId, setVendorId] = useState("")
+  const [region, setRegion] = useState("")
+  const [period, setPeriod] = useState("")
 
   // Use API hooks
-  const { taxEntries, loading: entriesLoading, error: entriesError, updateStatus } = useTaxEntries()
+  const { taxEntries, loading: entriesLoading, error: entriesError, updateStatus: updateEntryStatus, refetch: refetchEntries, update } = useTaxEntries()
   const { taxCodes, loading: codesLoading, error: codesError } = useTaxCodes()
+  const { taxProvisions, loading: provisionsLoading, error: provisionsError, updateStatus: updateProvisionStatus, refetch: refetchProvisions } = useTaxProvisions()
 
-  // Convert TaxEntry to TaxTransaction format for compatibility
-  const taxTransactions: TaxTransaction[] = taxEntries.map(entry => ({
-    id: entry.entry_id,
-    date: entry.created_at,
-    description: `Transaction ${entry.txn_id}`,
-    amount: entry.amount,
-    vendor: entry.vendor_customer_id || "Unknown Vendor",
-    category: entry.account_code,
-    taxCode: entry.tax_code,
-    status: entry.status === "PENDING_APPROVAL" ? "pending" :
-            entry.status === "APPLIED" ? "approved" : "flagged"
-  }))
+  // Filtered Tax Entries
+  const filteredTaxEntries = useMemo(() => {
+    return taxEntries.filter(entry => {
+      const matchesStatus = filterStatus === "all" ? true :
+        (entry.status === "PENDING_APPROVAL" && filterStatus === "pending") ||
+        (entry.status === "APPLIED" && filterStatus === "approved") ||
+        (entry.status === "REJECTED" && filterStatus === "flagged"); // Assuming 'flagged' maps to 'rejected'
+      const matchesTaxCode = filterTaxCode === "all" ? true : entry.tax_code === filterTaxCode;
+      return matchesStatus && matchesTaxCode;
+    }).map(entry => ({
+      id: entry.entry_id || `entry-${Math.random().toString(36).substring(7)}`, // Ensure id is always a string
+      date: entry.created_at,
+      description: `Transaction ${entry.txn_id}`,
+      amount: entry.amount,
+      vendor: entry.vendor_customer_id || "Unknown Vendor",
+      category: entry.account_code,
+      taxCode: entry.tax_code,
+      status: (entry.status === "PENDING_APPROVAL" ? "pending" :
+              (entry.status === "APPLIED" ? "approved" : "flagged")) as "pending" | "approved" | "flagged" // Ensure correct type mapping
+    }));
+  }, [taxEntries, filterStatus, filterTaxCode]);
 
-  // Handle row click to show details
-  const handleRowClick = (transaction: TaxTransaction) => {
-    // Find the corresponding TaxEntry
+  // Filtered Tax Provisions
+  const filteredTaxProvisions = useMemo(() => {
+    return taxProvisions.filter(provision => {
+      const matchesStatus = filterStatus === "all" ? true :
+        (provision.status === "PENDING_APPROVAL" && filterStatus === "pending") ||
+        (provision.status === "APPLIED" && filterStatus === "approved") ||
+        (provision.status === "REJECTED" && filterStatus === "flagged"); // Assuming 'flagged' maps to 'rejected'
+      const matchesPeriod = filterPeriod === "all" ? true : provision.period.includes(filterPeriod);
+      return matchesStatus && matchesPeriod;
+    }).map(provision => ({
+      id: provision.provision_id || `provision-${Math.random().toString(36).substring(7)}`, // Ensure id is always a string
+      period: provision.period,
+      amount: provision.provision_amount,
+      status: (provision.status === "PENDING_APPROVAL" ? "pending" :
+              (provision.status === "APPLIED" ? "approved" : "flagged")) as "pending" | "approved" | "flagged" // Frontend display statuses
+    }));
+  }, [taxProvisions, filterStatus, filterPeriod]);
+
+  // KPI Calculations
+  const { totalOutputTax, totalInputTax, netTaxPayable, nextFilingDueDate, daysUntilFiling } = useMemo(() => {
+    let outputTax = 0;
+    let inputTax = 0;
+
+    taxEntries.forEach(entry => {
+      // Assuming positive amount is output tax, negative is input tax. Adjust logic as per actual data.
+      if (entry.status === "APPLIED") { // Only consider applied entries for KPI
+        if (entry.amount > 0) {
+          outputTax += entry.amount;
+        } else {
+          inputTax += Math.abs(entry.amount); // Use absolute value for input tax
+        }
+      }
+    });
+
+    const net = outputTax - inputTax;
+
+    // Placeholder for next filing due date
+    const today = new Date();
+    const nextMonth = new Date(today.getFullYear(), today.getMonth() + 1, 1); // First day of next month
+    const filingDate = new Date(nextMonth.getFullYear(), nextMonth.getMonth(), 20); // Example: 20th of next month
+
+    const diffTime = filingDate.getTime() - today.getTime();
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+    return {
+      totalOutputTax: outputTax,
+      totalInputTax: inputTax,
+      netTaxPayable: net,
+      nextFilingDueDate: filingDate.toLocaleDateString(),
+      daysUntilFiling: diffDays > 0 ? diffDays : 0,
+    };
+  }, [taxEntries]);
+
+  // Tax Code Utilization Data
+  const taxCodeUtilizationData = useMemo(() => {
+    const codeCounts: { [key: string]: number } = {};
+    taxEntries.filter(e => e.status === "APPLIED").forEach(entry => {
+      codeCounts[entry.tax_code] = (codeCounts[entry.tax_code] || 0) + 1;
+    });
+
+    const totalEntries = taxEntries.filter(e => e.status === "APPLIED").length;
+
+    return Object.keys(codeCounts).map(code => ({
+      name: taxCodes.find(tc => tc.value === code)?.label || code,
+      value: codeCounts[code],
+      percentage: totalEntries > 0 ? (codeCounts[code] / totalEntries) * 100 : 0,
+    }));
+  }, [taxEntries, taxCodes]);
+
+  const PIE_COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#AF19FF', '#FF19A0']; // Example colors
+
+  // Exception Monitoring Data
+  const exceptionMonitoringData = useMemo(() => {
+    const missingTaxCodes = taxEntries.filter(e => !e.tax_code || e.tax_code === "N/A").length;
+    const invalidTaxIds = 0; // Placeholder, need actual data/logic
+    const unusualTaxRates = 0; // Placeholder, need actual data/logic
+    const manualOverrides = taxEntries.filter(e => e.confidence < 0.5 && e.status === "APPLIED").length; // Example: low confidence applied entries
+
+    return [
+      { name: "Transactions missing tax codes", count: missingTaxCodes },
+      { name: "Invalid tax IDs", count: invalidTaxIds },
+      { name: "Unusual tax rates", count: unusualTaxRates },
+      { name: "Manual overrides", count: manualOverrides },
+    ];
+  }, [taxEntries]);
+
+  // Reconciliation Data (Placeholders)
+  const reconciliationData = useMemo(() => {
+    return [
+      { name: "GL vs. Tax Transactions", status: "✔", value: true },
+      { name: "Input vs. Supplier Statements", status: "✔", value: true },
+      { name: "Historical Comparison", status: "⚠", value: false }, // Example: deviation
+    ];
+  }, []);
+
+  // Filing Calendar & Deadlines (Placeholder data)
+  const filingDeadlines = [
+    { id: 1, name: "VAT Q3 Filing", date: "2025-10-20", status: "Upcoming" },
+    { id: 2, name: "WHT September", date: "2025-10-15", status: "Submitted" },
+    { id: 3, name: "Income Tax Q2 Estimate", date: "2025-09-15", status: "Overdue" },
+  ];
+
+  // Monitoring Status Banner
+  const complianceStatus = useMemo(() => {
+    const pendingEntries = taxEntries.filter(e => e.status === "PENDING_APPROVAL").length;
+    const pendingProvisions = taxProvisions.filter(p => p.status === "PENDING_APPROVAL").length;
+    const flaggedEntries = taxEntries.filter(e => e.status === "REJECTED" || e.confidence < 0.85).length;
+    const flaggedProvisions = taxProvisions.filter(p => p.status === "REJECTED" || (p.confidence && p.confidence < 0.85)).length;
+
+    if (pendingEntries > 0 || pendingProvisions > 0) {
+      return { status: "🟡 Pending review", color: "bg-amber-500", icon: <Clock className="h-5 w-5" /> };
+    } else if (flaggedEntries > 0 || flaggedProvisions > 0) {
+      return { status: "🔴 Errors/exceptions", color: "bg-red-500", icon: <XCircle className="h-5 w-5" /> };
+    } else {
+      return { status: "🟢 Ready for filing", color: "bg-green-500", icon: <CheckCircle className="h-5 w-5" /> };
+    }
+  }, [taxEntries, taxProvisions]);
+
+  // Handle row click to show details for Tax Entries
+  const handleEntryRowClick = (transaction: TaxTransaction) => {
     const entry = taxEntries.find(e => e.entry_id === transaction.id)
     if (entry) {
       setSelectedEntry(entry)
@@ -58,7 +232,189 @@ export default function TaxCompliancePage() {
     }
   }
 
-  // Handle approve tax code
+  // Handle row click to show details for Tax Provisions
+  const handleProvisionRowClick = (provisionDisplay: TaxProvisionDisplay) => {
+    const provision = taxProvisions.find(p => p.provision_id === provisionDisplay.id)
+    if (provision) {
+      setSelectedProvision(provision)
+      setIsProvisionDetailsModalOpen(true)
+    }
+  }
+
+  // Handle batch approve tax entries
+  const handleApproveSelectedEntries = async () => {
+    if (Object.keys(selectedEntryIds).length === 0) return;
+
+    try {
+      for (const entryId in selectedEntryIds) {
+        if (selectedEntryIds[entryId]) {
+          await update(entryId, { status: "APPLIED" }); // Assuming we just apply, not change tax code in batch
+        }
+      }
+      toast({
+        title: "Batch Approval",
+        description: `${Object.keys(selectedEntryIds).length} tax entries approved successfully.`,
+      });
+      setSelectedEntryIds({}); // Clear selection
+      refetchEntries(); // Refetch data
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to approve selected tax entries.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  // Handle batch reject tax entries
+  const handleRejectSelectedEntries = async () => {
+    if (Object.keys(selectedEntryIds).length === 0) return;
+
+    try {
+      for (const entryId in selectedEntryIds) {
+        if (selectedEntryIds[entryId]) {
+          await update(entryId, { status: "REJECTED" });
+        }
+      }
+      toast({
+        title: "Batch Rejection",
+        description: `${Object.keys(selectedEntryIds).length} tax entries rejected successfully.`,
+      });
+      setSelectedEntryIds({}); // Clear selection
+      refetchEntries(); // Refetch data
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to reject selected tax entries.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  // Handle batch approve tax provisions
+  const handleApproveSelectedProvisions = async () => {
+    if (Object.keys(selectedProvisionIds).length === 0) return;
+
+    try {
+      for (const provisionId in selectedProvisionIds) {
+        if (selectedProvisionIds[provisionId]) {
+          await updateProvisionStatus(provisionId, "APPLIED");
+        }
+      }
+      toast({
+        title: "Batch Approval",
+        description: `${Object.keys(selectedProvisionIds).length} tax provisions approved successfully.`,
+      });
+      setSelectedProvisionIds({}); // Clear selection
+      refetchProvisions(); // Refetch data
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to approve selected tax provisions.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  // Handle batch reject tax provisions
+  const handleRejectSelectedProvisions = async () => {
+    if (Object.keys(selectedProvisionIds).length === 0) return;
+
+    try {
+      for (const provisionId in selectedProvisionIds) {
+        if (selectedProvisionIds[provisionId]) {
+          await updateProvisionStatus(provisionId, "REJECTED");
+        }
+      }
+      toast({
+        title: "Batch Rejection",
+        description: `${Object.keys(selectedProvisionIds).length} tax provisions rejected successfully.`,
+      });
+      setSelectedProvisionIds({}); // Clear selection
+      refetchProvisions(); // Refetch data
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to reject selected tax provisions.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  // Handle apply filters
+  const handleApplyFilters = () => {
+    // Filters are applied via useMemo, just close the modal
+    setIsFilterModalOpen(false)
+    toast({
+      title: "Filters Applied",
+      description: "Data has been filtered based on your selections.",
+    })
+  }
+
+  // Handle clear filters
+  const handleClearFilters = () => {
+    setFilterStatus("")
+    setFilterTaxCode("")
+    setFilterPeriod("")
+    setIsFilterModalOpen(false)
+    toast({
+      title: "Filters Cleared",
+      description: "All filters have been removed.",
+    })
+  }
+
+  // Handle export data
+  const handleExportData = () => {
+    let dataToExport: any[] = [];
+    let filename = "";
+
+    if (currentTab === "tax-entries") {
+      dataToExport = filteredTaxEntries;
+      filename = "tax_entries.csv";
+    } else {
+      dataToExport = filteredTaxProvisions;
+      filename = "tax_provisions.csv";
+    }
+
+    if (dataToExport.length === 0) {
+      toast({
+        title: "No Data to Export",
+        description: "There is no data matching the current filters to export.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const headers = Object.keys(dataToExport[0]);
+    const csv = [
+      headers.join(','),
+      ...dataToExport.map(row => headers.map(fieldName => JSON.stringify(row[fieldName])).join(','))
+    ].join('\n');
+
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    if (link.download !== undefined) { // feature detection
+      const url = URL.createObjectURL(blob);
+      link.setAttribute('href', url);
+      link.setAttribute('download', filename);
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      toast({
+        title: "Export Successful",
+        description: `Data exported to ${filename}.`,
+      });
+    } else {
+      toast({
+        title: "Export Failed",
+        description: "Your browser does not support downloading files directly.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  // Handle approve tax code for Tax Entry
   const handleApproveTaxCode = async () => {
     if (!selectedEntry || !selectedTaxCode) {
       toast({
@@ -69,7 +425,6 @@ export default function TaxCompliancePage() {
       return
     }
 
-    // Business logic validation
     if (selectedEntry.status === "APPLIED") {
       toast({
         title: "Validation Error",
@@ -89,13 +444,17 @@ export default function TaxCompliancePage() {
     }
 
     try {
-      await updateStatus(selectedEntry.entry_id, "APPLIED")
+      await update(selectedEntry.entry_id, {
+        status: "APPLIED",
+        tax_code: selectedTaxCode,
+      });
       toast({
         title: "Tax Code Approved",
         description: `Tax code ${selectedTaxCode} has been assigned to transaction ${selectedEntry.txn_id}.`,
       })
       setIsDetailsModalOpen(false)
       setSelectedEntry(null)
+      refetchEntries() // Refetch entries to show updated status
     } catch (error: any) {
       toast({
         title: "Error",
@@ -105,22 +464,238 @@ export default function TaxCompliancePage() {
     }
   }
 
-  // Status badge component
-  const StatusBadge = ({ status }: { status: TaxTransaction["status"] }) => {
-    switch (status) {
-      case "pending":
-        return <Badge className="bg-amber-100 text-amber-800">Pending</Badge>
-      case "approved":
-        return <Badge className="bg-green-100 text-green-800">Approved</Badge>
-      case "flagged":
-        return <Badge className="bg-red-100 text-red-800">Flagged</Badge>
-      default:
-        return null
+  // Handle reject tax code for Tax Entry
+  const handleRejectTaxCode = async () => {
+    if (!selectedEntry) {
+      toast({
+        title: "Validation Error",
+        description: "No tax entry selected for rejection.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    if (selectedEntry.status === "APPLIED") {
+      toast({
+        title: "Validation Error",
+        description: "This tax entry has already been applied and cannot be rejected.",
+      })
+      return
+    }
+
+    if (selectedEntry.status === "REJECTED") {
+      toast({
+        title: "Validation Error",
+        description: "This tax entry has already been rejected.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    try {
+      await updateEntryStatus(selectedEntry.entry_id, "REJECTED")
+      toast({
+        title: "Tax Code Rejected",
+        description: `Tax entry ${selectedEntry.txn_id} has been rejected.`,
+      })
+      setIsDetailsModalOpen(false)
+      setSelectedEntry(null)
+      refetchEntries() // Refetch entries to show updated status
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to reject tax code. Please try again.",
+        variant: "destructive",
+      })
     }
   }
 
-  // Table columns
-  const columns = [
+  // Handle approve tax provision
+  const handleApproveProvision = async () => {
+    if (!selectedProvision) {
+      toast({
+        title: "Validation Error",
+        description: "No tax provision selected for approval.",
+      })
+      return
+    }
+
+    if (selectedProvision.status === "APPLIED") {
+      toast({
+        title: "Validation Error",
+        description: "This tax provision has already been applied.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    if (selectedProvision.status === "REJECTED") {
+      toast({
+        title: "Validation Error",
+        description: "Cannot approve a rejected tax provision.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    try {
+      await updateProvisionStatus(selectedProvision.provision_id, "APPLIED")
+      toast({
+        title: "Tax Provision Approved",
+        description: `Tax provision for period ${selectedProvision.period} has been approved.`,
+      })
+      setIsProvisionDetailsModalOpen(false)
+      setSelectedProvision(null)
+      refetchProvisions() // Refetch provisions to show updated status
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to approve tax provision. Please try again.",
+        variant: "destructive",
+      })
+    }
+  }
+
+  // Handle reject tax provision
+  const handleRejectProvision = async () => {
+    if (!selectedProvision) {
+      toast({
+        title: "Validation Error",
+        description: "No tax provision selected for rejection.",
+      })
+      return
+    }
+
+    if (selectedProvision.status === "APPLIED") {
+      toast({
+        title: "Validation Error",
+        description: "This tax provision has already been applied and cannot be rejected.",
+      })
+      return
+    }
+
+    if (selectedProvision.status === "REJECTED") {
+      toast({
+        title: "Validation Error",
+        description: "This tax provision has already been rejected.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    try {
+      await updateProvisionStatus(selectedProvision.provision_id, "REJECTED")
+      toast({
+        title: "Tax Provision Rejected",
+        description: `Tax provision for period ${selectedProvision.period} has been rejected.`,
+      })
+      setIsProvisionDetailsModalOpen(false)
+      setSelectedProvision(null)
+      refetchProvisions() // Refetch provisions to show updated status
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to reject tax provision. Please try again.",
+        variant: "destructive",
+      })
+    }
+  }
+
+
+  // Handle Trigger Indirect Tax Classification
+  const handleTriggerIndirectTax = async () => {
+    if (!txnId || !accountCode || amount === '' || !region) {
+      toast({
+        title: "Validation Error",
+        description: "Please fill all required fields for Indirect Tax Classification.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    try {
+      const event: GlCompletedEvent = {
+        txnId,
+        accountCode,
+        amount: Number(amount),
+        vendorId: vendorId || undefined,
+        region,
+      }
+      await triggerAPI.triggerIndirectTaxClassification(event)
+      toast({
+        title: "Triggered",
+        description: `Indirect Tax Classification for ${txnId} triggered successfully.`,
+      })
+      // Clear form and refetch data
+      setTxnId("")
+      setAccountCode("")
+      setAmount("")
+      setVendorId("")
+      setRegion("")
+      refetchEntries()
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to trigger indirect tax classification.",
+        variant: "destructive",
+      })
+    }
+  }
+
+  // Handle Trigger Direct Tax Provision
+  const handleTriggerDirectTax = async () => {
+    if (!period) {
+      toast({
+        title: "Validation Error",
+        description: "Please enter a period for Direct Tax Provision.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    try {
+      const event: GlPeriodClosedEvent = { period }
+      await triggerAPI.triggerDirectTaxProvision(event)
+      toast({
+        title: "Triggered",
+        description: `Direct Tax Provision for period ${period} triggered successfully.`,
+      })
+      // Clear form and refetch data
+      setPeriod("")
+      refetchProvisions()
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to trigger direct tax provision.",
+        variant: "destructive",
+      })
+    }
+  }
+
+  // Table columns for Tax Entries
+  const entryColumns = [
+    {
+      id: "select",
+      header: ({ table }: any) => (
+        <Checkbox
+          checked={
+            table.getIsAllPageRowsSelected() ||
+            (table.getIsSomePageRowsSelected() && "indeterminate")
+          }
+          onCheckedChange={(value: boolean) => table.toggleAllPageRowsSelected(!!value)}
+          aria-label="Select all"
+        />
+      ),
+      cell: ({ row }: any) => (
+        <Checkbox
+          checked={row.getIsSelected()}
+          onCheckedChange={(value: boolean) => row.toggleSelected(!!value)}
+          aria-label="Select row"
+        />
+      ),
+      enableSorting: false,
+      enableHiding: false,
+    },
     {
       accessorKey: "date",
       header: "Date",
@@ -152,7 +727,53 @@ export default function TaxCompliancePage() {
       header: "Tax Code",
       cell: ({ row }: any) => {
         const taxCode = row.getValue("taxCode")
-        return <Badge className={getStatusColor("pending")}>{taxCode}</Badge>
+        // Tax code itself does not have a status like 'pending', just display it
+        return <Badge variant="secondary">{taxCode}</Badge>
+      },
+    },
+    {
+      accessorKey: "status",
+      header: "Status",
+      cell: ({ row }: any) => {
+        const status = row.getValue("status")
+        return <Badge className={getStatusColor(status)}>{status.replace('_', ' ')}</Badge>
+      },
+    },
+  ]
+
+  // Table columns for Tax Provisions
+  const provisionColumns = [
+    {
+      id: "select",
+      header: ({ table }: any) => (
+        <Checkbox
+          checked={
+            table.getIsAllPageRowsSelected() ||
+            (table.getIsSomePageRowsSelected() && "indeterminate")
+          }
+          onCheckedChange={(value) => table.toggleAllPageRowsSelected(!!value)}
+          aria-label="Select all"
+        />
+      ),
+      cell: ({ row }: any) => (
+        <Checkbox
+          checked={row.getIsSelected()}
+          onCheckedChange={(value) => row.toggleSelected(!!value)}
+          aria-label="Select row"
+        />
+      ),
+      enableSorting: false,
+      enableHiding: false,
+    },
+    {
+      accessorKey: "period",
+      header: "Period",
+    },
+    {
+      accessorKey: "amount",
+      header: "Provision Amount",
+      cell: ({ row }: any) => {
+        return formatCurrency(Number.parseFloat(row.getValue("amount")))
       },
     },
     {
@@ -166,7 +787,7 @@ export default function TaxCompliancePage() {
   ]
 
   // Show loading state
-  if (entriesLoading || codesLoading) {
+  if (entriesLoading || codesLoading || provisionsLoading) {
     return (
       <AppShell>
         <div className="space-y-6">
@@ -179,8 +800,8 @@ export default function TaxCompliancePage() {
           <Card>
             <CardContent className="flex items-center justify-center h-64">
               <div className="text-center">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 mx-auto"></div>
-                <p className="mt-2 text-sm text-gray-600">Loading tax entries...</p>
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div>
+                <p className="mt-2 text-sm text-muted-foreground">Loading tax data...</p>
               </div>
             </CardContent>
           </Card>
@@ -190,7 +811,7 @@ export default function TaxCompliancePage() {
   }
 
   // Show error state
-  if (entriesError || codesError) {
+  if (entriesError || codesError || provisionsError) {
     return (
       <AppShell>
         <div className="space-y-6">
@@ -203,9 +824,9 @@ export default function TaxCompliancePage() {
           <Card>
             <CardContent className="flex items-center justify-center h-64">
               <div className="text-center">
-                <AlertCircle className="h-8 w-8 text-red-500 mx-auto mb-2" />
-                <p className="text-sm text-red-600">
-                  {entriesError?.message || codesError?.message || "Failed to load data"}
+                <AlertCircle className="h-8 w-8 text-destructive mx-auto mb-2" />
+                <p className="text-sm text-destructive-foreground">
+                  {entriesError?.message || codesError?.message || provisionsError?.message || "Failed to load data"}
                 </p>
                 <Button
                   onClick={() => window.location.reload()}
@@ -225,48 +846,318 @@ export default function TaxCompliancePage() {
   return (
     <AppShell>
       <div className="space-y-6">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight">Tax & Compliance</h1>
-            <p className="text-muted-foreground">Manage tax codes and ensure compliance with tax regulations</p>
+        {/* Monitoring Status Banner */}
+        <Card className={`p-4 flex items-center justify-between shadow-md ${complianceStatus.color}`}>
+          <div className="flex items-center space-x-3">
+            {complianceStatus.icon}
+            <CardTitle className="text-white text-xl">{complianceStatus.status}</CardTitle>
           </div>
           <div className="mt-4 sm:mt-0 flex flex-col sm:flex-row gap-2">
-            <Button variant="outline">
+            <Button variant="outline" onClick={() => setIsFilterModalOpen(true)} className="bg-white text-gray-800 hover:bg-gray-100">
               <Filter className="mr-2 h-4 w-4" />
               Filter
             </Button>
-            <Button variant="outline">
+            <Button variant="outline" onClick={handleExportData} className="bg-white text-gray-800 hover:bg-gray-100">
               <Download className="mr-2 h-4 w-4" />
               Export
             </Button>
           </div>
+        </Card>
+
+          {/* Top Bar KPIs */}
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Total Output Tax</CardTitle>
+                <TrendingUp className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{formatCurrency(totalOutputTax)}</div>
+                <p className="text-xs text-muted-foreground">From sales invoices</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Total Input Tax</CardTitle>
+                <TrendingUp className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{formatCurrency(totalInputTax)}</div>
+                <p className="text-xs text-muted-foreground">From purchases & expenses</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Net Tax Payable/Refundable</CardTitle>
+                <TrendingUp className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{formatCurrency(netTaxPayable)}</div>
+                <p className="text-xs text-muted-foreground">Output – Input</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Next Filing Due</CardTitle>
+                <CalendarDays className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{nextFilingDueDate}</div>
+                <p className="text-xs text-muted-foreground">
+                  {daysUntilFiling > 0 ? `${daysUntilFiling} days left` : "Today or overdue"}
+                </p>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Tax Code Utilization and Filing Calendar */}
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">
+            {/* Tax Code Utilization (Analytics Widget) */}
+            <Card className="col-span-4">
+              <CardHeader>
+                <CardTitle>Tax Code Utilization</CardTitle>
+                <CardDescription>Breakdown of tax codes used in the period.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {taxCodeUtilizationData.length > 0 ? (
+                  <ResponsiveContainer width="100%" height={300}>
+                    <PieChart>
+                      <Pie
+                        data={taxCodeUtilizationData}
+                        cx="50%"
+                        cy="50%"
+                        labelLine={false}
+                        outerRadius={80}
+                        fill="#8884d8"
+                        dataKey="value"
+                        nameKey="name"
+                        label={({ name, percentage }) => `${name} (${percentage.toFixed(1)}%)`}
+                      >
+                        {taxCodeUtilizationData.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
+                        ))}
+                      </Pie>
+                      <Tooltip formatter={(value: number, name: string, props) => [`${value} entries`, props.payload.percentage.toFixed(1) + '%']} />
+                      <Legend />
+                    </PieChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="text-center text-muted-foreground">No tax code utilization data available.</div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Filing Calendar & Deadlines */}
+            <Card className="col-span-3">
+              <CardHeader>
+                <CardTitle>Filing Calendar & Deadlines</CardTitle>
+                <CardDescription>Upcoming and overdue tax filing deadlines.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-4">
+                  {filingDeadlines.map((deadline) => (
+                    <div key={deadline.id} className="flex items-center justify-between">
+                      <div>
+                        <p className="font-medium">{deadline.name}</p>
+                        <p className="text-sm text-muted-foreground">{formatDate(deadline.date)}</p>
+                      </div>
+                      <Badge variant={deadline.status === "Overdue" ? "destructive" : deadline.status === "Submitted" ? "default" : "secondary"}>
+                        {deadline.status}
+                      </Badge>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Exception Monitoring (Alert Panel) */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Exception Monitoring</CardTitle>
+              <CardDescription>Highlight risks before filing.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                {exceptionMonitoringData.map((exception, index) => (
+                  <div key={index} className="flex items-center justify-between border-b pb-2 last:border-b-0 last:pb-0">
+                    <div className="flex items-center space-x-2">
+                      <AlertCircle className="h-4 w-4 text-amber-500" />
+                      <p className="font-medium">{exception.name}</p>
+                    </div>
+                    <Badge variant="outline" className="bg-amber-100 text-amber-800">
+                      {exception.count} Issues
+                    </Badge>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Reconciliation (Control Check Widget) */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Reconciliation</CardTitle>
+              <CardDescription>Ensure filings align with books.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                {reconciliationData.map((item, index) => (
+                  <div key={index} className="flex items-center justify-between border-b pb-2 last:border-b-0 last:pb-0">
+                    <p className="font-medium">{item.name}</p>
+                    {item.status === "✔" && <CheckCircle className="h-5 w-5 text-green-500" />}
+                    {item.status === "✖" && <XCircle className="h-5 w-5 text-red-500" />}
+                    {item.status === "⚠" && <AlertCircle className="h-5 w-5 text-amber-500" />}
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Audit Trail & Reports */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Audit Trail & Reports</CardTitle>
+              <CardDescription>Quick-access export buttons for supporting documents.</CardDescription>
+            </CardHeader>
+            <CardContent className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              <Button variant="outline">
+                <FileText className="mr-2 h-4 w-4" /> Tax Return Draft
+              </Button>
+              <Button variant="outline">
+                <FileText className="mr-2 h-4 w-4" /> Transaction Details
+              </Button>
+              <Button variant="outline">
+                <FileText className="mr-2 h-4 w-4" /> Adjustment Notes
+              </Button>
+              <Button variant="outline" onClick={handleExportData}>
+                <Download className="mr-2 h-4 w-4" /> Export All (CSV, Excel, XML)
+              </Button>
+            </CardContent>
+          </Card>
+
+          {/* Agent Trigger Section (Moved to bottom as per structure) */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Trigger Agent Processes</CardTitle>
+              <CardDescription>Manually trigger indirect tax classification or direct tax provision calculation.</CardDescription>
+            </CardHeader>
+            <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Indirect Tax Classification Trigger */}
+              <div className="space-y-4 border rounded-md p-4">
+                <h3 className="text-lg font-medium">Indirect Tax Classification</h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <Label htmlFor="txnId">Transaction ID</Label>
+                    <Input id="txnId" value={txnId} onChange={(e) => setTxnId(e.target.value)} placeholder="e.g., TXN-123" />
+                  </div>
+                  <div>
+                    <Label htmlFor="accountCode">Account Code</Label>
+                    <Input id="accountCode" value={accountCode} onChange={(e) => setAccountCode(e.target.value)} placeholder="e.g., 5000-Expenses" />
+                  </div>
+                  <div>
+                    <Label htmlFor="amount">Amount</Label>
+                    <Input id="amount" type="number" value={amount} onChange={(e) => setAmount(Number(e.target.value))} placeholder="e.g., 1000.00" />
+                  </div>
+                  <div>
+                    <Label htmlFor="vendorId">Vendor/Customer ID (Optional)</Label>
+                    <Input id="vendorId" value={vendorId} onChange={(e) => setVendorId(e.target.value)} placeholder="e.g., V-456" />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <Label htmlFor="region">Region</Label>
+                    <Input id="region" value={region} onChange={(e) => setRegion(e.target.value)} placeholder="e.g., CA" />
+                  </div>
+                </div>
+                <Button onClick={handleTriggerIndirectTax} className="w-full">Trigger Indirect Tax</Button>
+              </div>
+
+              {/* Direct Tax Provision Trigger */}
+              <div className="space-y-4 border rounded-md p-4">
+                <h3 className="text-lg font-medium">Direct Tax Provision Calculation</h3>
+                <div className="space-y-2">
+                  <Label htmlFor="period">Period (YYYY-MM)</Label>
+                  <Input id="period" value={period} onChange={(e) => setPeriod(e.target.value)} placeholder="e.g., 2025-05" />
+                </div>
+                <Button onClick={handleTriggerDirectTax} className="w-full">Trigger Direct Tax Provision</Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Batch Action Buttons */}
+          {(Object.keys(selectedEntryIds).length > 0 && currentTab === "tax-entries") || (Object.keys(selectedProvisionIds).length > 0 && currentTab === "tax-provisions") ? (
+            <div className="flex gap-2 justify-end">
+              <Button
+                variant="outline"
+                onClick={currentTab === "tax-entries" ? handleApproveSelectedEntries : handleApproveSelectedProvisions}
+                disabled={(currentTab === "tax-entries" && Object.keys(selectedEntryIds).length === 0) || (currentTab === "tax-provisions" && Object.keys(selectedProvisionIds).length === 0)}
+              >
+                Approve Selected ({currentTab === "tax-entries" ? Object.keys(selectedEntryIds).length : Object.keys(selectedProvisionIds).length})
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={currentTab === "tax-entries" ? handleRejectSelectedEntries : handleRejectSelectedProvisions}
+                disabled={(currentTab === "tax-entries" && Object.keys(selectedEntryIds).length === 0) || (currentTab === "tax-provisions" && Object.keys(selectedProvisionIds).length === 0)}
+              >
+                Reject Selected ({currentTab === "tax-entries" ? Object.keys(selectedEntryIds).length : Object.keys(selectedProvisionIds).length})
+              </Button>
+            </div>
+          ) : null}
+
+          <Tabs defaultValue="tax-entries" onValueChange={setCurrentTab}>
+            <TabsList className="grid w-full grid-cols-2">
+              <TabsTrigger value="tax-entries">Tax Entries ({filteredTaxEntries.length})</TabsTrigger>
+              <TabsTrigger value="tax-provisions">Tax Provisions ({filteredTaxProvisions.length})</TabsTrigger>
+            </TabsList>
+            <TabsContent value="tax-entries">
+              {/* Tax Transactions */}
+              <Card>
+                <CardHeader>
+                  <CardTitle>Tax Code Assignment</CardTitle>
+                  <CardDescription>Review and assign tax codes to transactions ({filteredTaxEntries.length} entries)</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <DataTable
+                    columns={entryColumns}
+                    data={filteredTaxEntries}
+                    searchColumn="description"
+                    onRowClick={handleEntryRowClick}
+                    rowSelection={selectedEntryIds}
+                    onRowSelectionChange={setSelectedEntryIds}
+                  />
+                </CardContent>
+              </Card>
+            </TabsContent>
+            <TabsContent value="tax-provisions">
+              {/* Tax Provisions */}
+              <Card>
+                <CardHeader>
+                  <CardTitle>Tax Provisions</CardTitle>
+                  <CardDescription>Review and manage direct tax provisions ({filteredTaxProvisions.length} provisions)</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <DataTable
+                    columns={provisionColumns}
+                    data={filteredTaxProvisions}
+                    searchColumn="period"
+                    onRowClick={handleProvisionRowClick}
+                    rowSelection={selectedProvisionIds}
+                    onRowSelectionChange={setSelectedProvisionIds}
+                  />
+                </CardContent>
+              </Card>
+            </TabsContent>
+          </Tabs>
         </div>
 
-        {/* Tax Transactions */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Tax Code Assignment</CardTitle>
-            <CardDescription>Review and assign tax codes to transactions ({taxEntries.length} entries)</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <DataTable
-              columns={columns}
-              data={taxTransactions}
-              searchColumn="description"
-              onRowClick={handleRowClick}
-            />
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Transaction Details Modal */}
+      {/* Transaction Details Modal (Tax Entry) */}
       <ModalDialog
         title="Assign Tax Code"
         isOpen={isDetailsModalOpen}
         onClose={() => setIsDetailsModalOpen(false)}
-        onConfirm={handleApproveTaxCode}
         confirmText="Approve Tax Code"
-        cancelText="Cancel"
+        onConfirm={handleApproveTaxCode}
+        cancelText="Reject Tax Code"
+        onCancel={handleRejectTaxCode} // Added reject handler
         size="lg"
       >
         {selectedEntry && (
@@ -364,6 +1255,142 @@ export default function TaxCompliancePage() {
             </div>
           </div>
         )}
+      </ModalDialog>
+
+      {/* Provision Details Modal (Tax Provision) */}
+      <ModalDialog
+        title="Review Tax Provision"
+        isOpen={isProvisionDetailsModalOpen}
+        onClose={() => setIsProvisionDetailsModalOpen(false)}
+        confirmText="Approve Provision"
+        onConfirm={handleApproveProvision}
+        cancelText="Reject Provision"
+        onCancel={handleRejectProvision}
+        size="lg"
+      >
+        {selectedProvision && (
+          <div className="space-y-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <h3 className="text-sm font-medium text-gray-500">Period</h3>
+                <p className="mt-1">{selectedProvision.period}</p>
+              </div>
+              <div>
+                <h3 className="text-sm font-medium text-gray-500">Provision Amount</h3>
+                <p className="mt-1">{formatCurrency(selectedProvision.provision_amount)}</p>
+              </div>
+              <div>
+                <h3 className="text-sm font-medium text-gray-500">Model Version</h3>
+                <p className="mt-1">{selectedProvision.model_version}</p>
+              </div>
+              <div>
+                <h3 className="text-sm font-medium text-gray-500">Confidence</h3>
+                <div className="mt-1">
+                  <span className={getConfidenceColor(selectedProvision.confidence || 0)}>
+                    {(selectedProvision.confidence ? selectedProvision.confidence * 100 : 0).toFixed(1)}%
+                  </span>
+                </div>
+              </div>
+              <div>
+                <h3 className="text-sm font-medium text-gray-500">Status</h3>
+                <div className="mt-1">
+                  <Badge className={getStatusColor(selectedProvision.status)}>
+                    {selectedProvision.status.replace('_', ' ')}
+                  </Badge>
+                </div>
+              </div>
+              <div>
+                <h3 className="text-sm font-medium text-gray-500">Created At</h3>
+                <p className="mt-1">{formatDate(selectedProvision.created_at)}</p>
+              </div>
+            </div>
+
+            {selectedProvision.status === "PENDING_APPROVAL" && selectedProvision.confidence && selectedProvision.confidence < 0.85 && (
+              <div className="border-t border-gray-200 pt-4">
+                <div className="bg-amber-50 border border-amber-200 rounded-md p-4">
+                  <div className="flex items-start">
+                    <AlertCircle className="h-5 w-5 text-amber-600 mt-0.5 mr-2" />
+                    <div>
+                      <h3 className="font-medium text-amber-800">Low Confidence</h3>
+                      <p className="text-sm text-amber-700 mt-1">
+                        This tax provision calculation has low confidence and requires manual review.
+                        Please verify the amount is correct before approving.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+            {/* Policy Snippets if available */}
+            {selectedProvision.policy_snippets && Object.keys(selectedProvision.policy_snippets).length > 0 && (
+              <div className="border-t border-gray-200 pt-4">
+                <h3 className="text-sm font-medium text-gray-500 mb-2">Policy Snippets</h3>
+                <div className="prose prose-sm max-w-none">
+                  <pre className="whitespace-pre-wrap text-sm text-gray-700 bg-gray-50 p-3 rounded-md">
+                    {JSON.stringify(selectedProvision.policy_snippets, null, 2)}
+                  </pre>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </ModalDialog>
+
+      {/* Filter Modal */}
+      <ModalDialog
+        title="Filter Options"
+        isOpen={isFilterModalOpen}
+        onClose={() => setIsFilterModalOpen(false)}
+        confirmText="Apply Filters"
+        onConfirm={handleApplyFilters}
+        cancelText="Clear Filters"
+        onCancel={handleClearFilters}
+      >
+        <div className="grid grid-cols-1 gap-4">
+          <div>
+            <Label htmlFor="filter-status">Status</Label>
+              <Select value={filterStatus} onValueChange={setFilterStatus}>
+                <SelectTrigger id="filter-status">
+                  <SelectValue placeholder="Select status" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All</SelectItem>
+                  <SelectItem value="pending">Pending</SelectItem>
+                  <SelectItem value="approved">Approved</SelectItem>
+                  <SelectItem value="flagged">Flagged</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          {currentTab === "tax-entries" && (
+            <div>
+              <Label htmlFor="filter-tax-code">Tax Code</Label>
+              <Select value={filterTaxCode} onValueChange={setFilterTaxCode}>
+                <SelectTrigger id="filter-tax-code">
+                  <SelectValue placeholder="Select tax code" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All</SelectItem>
+                  {taxCodes.map((code) => (
+                    <SelectItem key={code.value} value={code.value}>
+                      {code.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+          {currentTab === "tax-provisions" && (
+            <div>
+              <Label htmlFor="filter-period">Period</Label>
+              <Input
+                id="filter-period"
+                value={filterPeriod}
+                onChange={(e) => setFilterPeriod(e.target.value)}
+                placeholder="e.g., 2025-05"
+              />
+            </div>
+          )}
+        </div>
       </ModalDialog>
     </AppShell>
   )
