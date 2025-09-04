@@ -99,6 +99,12 @@ export function ChatWidget({ onClose }: ChatWidgetProps) {
     }, 1500)
   }
 
+
+  const toggleRecording = () => {
+    setIsRecording(!isRecording)
+    // In a real implementation, this would start/stop speech recognition
+  }
+
   const getAIResponse = (query: string): string => {
     // Simple response logic - in a real app, this would call an API
     const lowerQuery = query.toLowerCase()
@@ -118,17 +124,13 @@ export function ChatWidget({ onClose }: ChatWidgetProps) {
     return "I'll help you with that. Would you like me to navigate to the relevant section of the platform?"
   }
 
-  const toggleRecording = () => {
-    setIsRecording(!isRecording)
-    // In a real implementation, this would start/stop speech recognition
-  }
-
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault()
       handleSendMessage()
     }
   }
+
 
   return (
     <div className="fixed bottom-4 right-4 w-[350px] md:w-[450px] lg:w-[500px] max-h-[95vh] bg-white rounded-lg shadow-xl flex flex-col z-50 border border-teal-500">
