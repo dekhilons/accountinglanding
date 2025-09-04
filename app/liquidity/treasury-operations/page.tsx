@@ -31,6 +31,7 @@ export default function TreasuryOperationsPage() {
   const [selectedCreditLine, setSelectedCreditLine] = useState<CreditLine | null>(null)
   const [transferAmount, setTransferAmount] = useState("")
   const [transferAccount, setTransferAccount] = useState("")
+  const [rowSelection, setRowSelection] = useState({}) // Add rowSelection state
 
   // Sample data for credit lines
   const creditLines: CreditLine[] = [
@@ -220,7 +221,14 @@ export default function TreasuryOperationsPage() {
             <CardDescription>Manage your company's credit facilities and debt</CardDescription>
           </CardHeader>
           <CardContent>
-            <DataTable columns={columns} data={creditLines} searchColumn="name" onRowClick={handleRowClick} />
+            <DataTable
+              columns={columns}
+              data={creditLines}
+              searchColumn="name"
+              onRowClick={handleRowClick}
+              rowSelection={rowSelection} // Pass rowSelection
+              onRowSelectionChange={setRowSelection} // Pass onRowSelectionChange
+            />
           </CardContent>
         </Card>
       </div>

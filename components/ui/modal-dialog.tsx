@@ -18,7 +18,8 @@ interface ModalDialogProps {
   description?: string
   isOpen: boolean
   onClose: () => void
-  onConfirm?: () => void
+  onConfirm?: () => Promise<void> | void // Added Promise<void> for async handlers
+  onCancel?: () => Promise<void> | void // Added for custom cancel logic
   confirmText?: string
   cancelText?: string
   children?: React.ReactNode
@@ -31,6 +32,7 @@ export function ModalDialog({
   isOpen,
   onClose,
   onConfirm,
+  onCancel, // Destructure onCancel prop
   confirmText = "Confirm",
   cancelText = "Cancel",
   children,
@@ -47,9 +49,16 @@ export function ModalDialog({
     onClose()
   }
 
-  const handleConfirm = () => {
+  const handleConfirm = async () => { // Made async to handle Promise<void>
     if (onConfirm) {
-      onConfirm()
+      await onConfirm() // Await onConfirm
+    }
+    handleClose()
+  }
+
+  const handleCancel = async () => { // New handler for onCancel
+    if (onCancel) {
+      await onCancel() // Await onCancel
     }
     handleClose()
   }
@@ -80,12 +89,18 @@ export function ModalDialog({
 
         <div className="px-6 py-2">{children}</div>
 
-        {onConfirm && (
+        {(onConfirm || onCancel) && ( // Render footer if either confirm or cancel is provided
           <DialogFooter className="p-6 pt-2">
-            <Button variant="outline" onClick={handleClose}>
-              {cancelText}
-            </Button>
-            <Button onClick={handleConfirm}>{confirmText}</Button>
+            {/* Render cancel button only if onCancel is provided */}
+            {onCancel && (
+              <Button variant="outline" onClick={handleCancel}>
+                {cancelText}
+              </Button>
+            )}
+            {/* Render confirm button only if onConfirm is provided */}
+            {onConfirm && (
+              <Button onClick={handleConfirm}>{confirmText}</Button>
+            )}
           </DialogFooter>
         )}
       </DialogContent>

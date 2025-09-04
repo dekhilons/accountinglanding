@@ -55,6 +55,33 @@ export interface TaxEntryUpdate {
   policy_snippets?: any;
 }
 
+export interface TaxProvision {
+  provision_id: string;
+  tenant_id: string;
+  period: string;
+  provision_amount: number;
+  model_version: string;
+  status: 'PENDING_APPROVAL' | 'APPLIED' | 'REJECTED';
+  confidence?: number;
+  policy_snippets?: any;
+  created_at: string;
+  updated_at?: string;
+}
+
+export interface GlCompletedEvent {
+  txnId: string;
+  accountCode: string;
+  amount: number;
+  vendorId?: string;
+  customerId?: string;
+  region: string;
+}
+
+export interface GlPeriodClosedEvent {
+  period: string;
+}
+
+
 // API Error handling
 export class APIError extends Error {
   constructor(
@@ -155,6 +182,32 @@ export const taxEntryAPI = {
   },
 };
 
+// Tax Provision API functions
+export const taxProvisionAPI = {
+  // Get all tax provisions with optional filtering
+  async list(status?: string, limit: number = 100, offset: number = 0): Promise<TaxProvision[]> {
+    const params = new URLSearchParams();
+    if (status) params.append('status', status);
+    params.append('limit', limit.toString());
+    params.append('offset', offset.toString());
+    const queryString = params.toString();
+    return apiRequest<TaxProvision[]>(`/tax-provisions${queryString ? `?${queryString}` : ''}`);
+  },
+
+  // Get tax provision by ID
+  async get(provision_id: string): Promise<TaxProvision> {
+    return apiRequest<TaxProvision>(`/tax-provisions/${provision_id}`);
+  },
+
+  // Update tax provision status
+  async updateStatus(provision_id: string, status: string): Promise<{ message: string }> {
+    return apiRequest<{ message: string }>(`/tax-provisions/${provision_id}/status`, {
+      method: 'PUT',
+      body: JSON.stringify({ status }),
+    });
+  },
+};
+
 // Tax Code API functions
 export const taxCodeAPI = {
   // Get available tax codes
@@ -167,6 +220,23 @@ export const taxCodeAPI = {
 export const healthAPI = {
   async check(): Promise<{ status: string }> {
     return apiRequest<{ status: string }>('/health');
+  },
+};
+
+// Agent Trigger API functions
+export const triggerAPI = {
+  async triggerIndirectTaxClassification(event: GlCompletedEvent): Promise<{ message: string }> {
+    return apiRequest<{ message: string }>('/trigger/indirect-tax-classification', {
+      method: 'POST',
+      body: JSON.stringify(event),
+    });
+  },
+
+  async triggerDirectTaxProvision(event: GlPeriodClosedEvent): Promise<{ message: string }> {
+    return apiRequest<{ message: string }>('/trigger/direct-tax-provision', {
+      method: 'POST',
+      body: JSON.stringify(event),
+    });
   },
 };
 
@@ -229,6 +299,48 @@ export function useTaxEntries(status?: string, limit: number = 100, offset: numb
   };
 }
 
+export function useTaxProvisions(status?: string, limit: number = 100, offset: number = 0) {
+  const [taxProvisions, setTaxProvisions] = useState<TaxProvision[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<APIError | null>(null);
+
+  const fetchTaxProvisions = async () => {
+    try {
+      setLoading(true);
+      const data = await taxProvisionAPI.list(status, limit, offset);
+      setTaxProvisions(data);
+      setError(null);
+    } catch (err) {
+      setError(err as APIError);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchTaxProvisions();
+  }, [status, limit, offset]);
+
+  return {
+    taxProvisions,
+    loading,
+    error,
+    refetch: fetchTaxProvisions,
+    updateStatus: async (provisionId: string, status: string) => {
+      const validStatuses = ["PENDING_APPROVAL", "APPLIED", "REJECTED"];
+      if (!validStatuses.includes(status)) {
+        throw new APIError(`Invalid status: ${status}`, 400);
+      }
+
+      await taxProvisionAPI.updateStatus(provisionId, status);
+      setTaxProvisions(prev => prev.map(provision =>
+        provision.provision_id === provisionId ? { ...provision, status: status as any } : provision
+      ));
+    },
+  };
+}
+
+
 export function useTaxCodes() {
   const [taxCodes, setTaxCodes] = useState<TaxCode[]>([]);
   const [loading, setLoading] = useState(true);
@@ -278,6 +390,7 @@ export const getStatusColor = (status: string): string => {
     case 'pending_approval':
       return 'text-amber-600 bg-amber-100';
     case 'rejected':
+    case 'flagged': // Add 'flagged' to map to rejected styling
       return 'text-red-600 bg-red-100';
     default:
       return 'text-gray-600 bg-gray-100';
