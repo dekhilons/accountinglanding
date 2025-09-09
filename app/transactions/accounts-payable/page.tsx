@@ -167,7 +167,7 @@ export default function AccountsPayablePage() {
             matched: Math.random() > 0.5, // Mock matched status for now
             exceptions: Math.random() > 0.7 ? ["Mock exception"] : [], // Mock exceptions
             confidence: Math.floor(Math.random() * 30) + 70, // Mock confidence 70-99
-            document_path: `/mock_invoice_${inv.action_id}.pdf`, // Mock document path for testing
+            document_path: inv.documentId, // Use the documentId from the fetched invoice as the MinIO path
           }))
         )
       } catch (error) {
@@ -214,8 +214,8 @@ export default function AccountsPayablePage() {
       setIsPdfLoading(true);
       const fetchPdf = async () => {
         try {
-          // Assuming document_path directly maps to a backend endpoint or can be used to construct one
-          const url = `/api/v1/documents/${selectedItem.document_path}`; 
+          // Fetch from the ingestion service's document preview endpoint
+          const url = `http://localhost:8002/document/preview?minio_path=${encodeURIComponent(selectedItem.document_path as string)}`; 
           const response = await fetch(url);
           if (!response.ok) {
             throw new Error(`Failed to fetch PDF: ${response.statusText}`);

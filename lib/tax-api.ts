@@ -136,9 +136,10 @@ async function apiRequest<T>(
 // Tax Entry API functions
 export const taxEntryAPI = {
   // Get all tax entries with optional filtering
-  async list(status?: string, limit: number = 100, offset: number = 0): Promise<TaxEntry[]> {
+  async list(status?: string, taxCode?: string, limit: number = 100, offset: number = 0): Promise<TaxEntry[]> {
     const params = new URLSearchParams();
     if (status) params.append('status', status);
+    if (taxCode) params.append('tax_code', taxCode);
     params.append('limit', limit.toString());
     params.append('offset', offset.toString());
     const queryString = params.toString();
@@ -185,9 +186,10 @@ export const taxEntryAPI = {
 // Tax Provision API functions
 export const taxProvisionAPI = {
   // Get all tax provisions with optional filtering
-  async list(status?: string, limit: number = 100, offset: number = 0): Promise<TaxProvision[]> {
+  async list(status?: string, period?: string, limit: number = 100, offset: number = 0): Promise<TaxProvision[]> {
     const params = new URLSearchParams();
     if (status) params.append('status', status);
+    if (period) params.append('period', period);
     params.append('limit', limit.toString());
     params.append('offset', offset.toString());
     const queryString = params.toString();
@@ -241,7 +243,7 @@ export const triggerAPI = {
 };
 
 // React hooks for API integration
-export function useTaxEntries(status?: string, limit: number = 100, offset: number = 0) {
+export function useTaxEntries(status?: string, taxCode?: string, limit: number = 100, offset: number = 0) {
   const [taxEntries, setTaxEntries] = useState<TaxEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<APIError | null>(null);
@@ -249,7 +251,7 @@ export function useTaxEntries(status?: string, limit: number = 100, offset: numb
   const fetchTaxEntries = async () => {
     try {
       setLoading(true);
-      const data = await taxEntryAPI.list(status, limit, offset);
+      const data = await taxEntryAPI.list(status, taxCode, limit, offset);
       setTaxEntries(data);
       setError(null);
     } catch (err) {
@@ -261,7 +263,7 @@ export function useTaxEntries(status?: string, limit: number = 100, offset: numb
 
   useEffect(() => {
     fetchTaxEntries();
-  }, [status, limit, offset]);
+  }, [status, taxCode, limit, offset]);
 
   return {
     taxEntries,
@@ -299,7 +301,7 @@ export function useTaxEntries(status?: string, limit: number = 100, offset: numb
   };
 }
 
-export function useTaxProvisions(status?: string, limit: number = 100, offset: number = 0) {
+export function useTaxProvisions(status?: string, period?: string, limit: number = 100, offset: number = 0) {
   const [taxProvisions, setTaxProvisions] = useState<TaxProvision[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<APIError | null>(null);
@@ -307,7 +309,7 @@ export function useTaxProvisions(status?: string, limit: number = 100, offset: n
   const fetchTaxProvisions = async () => {
     try {
       setLoading(true);
-      const data = await taxProvisionAPI.list(status, limit, offset);
+      const data = await taxProvisionAPI.list(status, period, limit, offset);
       setTaxProvisions(data);
       setError(null);
     } catch (err) {
@@ -319,7 +321,7 @@ export function useTaxProvisions(status?: string, limit: number = 100, offset: n
 
   useEffect(() => {
     fetchTaxProvisions();
-  }, [status, limit, offset]);
+  }, [status, period, limit, offset]);
 
   return {
     taxProvisions,
