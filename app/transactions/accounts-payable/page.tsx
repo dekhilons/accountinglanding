@@ -356,7 +356,7 @@ export default function AccountsPayablePage() {
   // Get summary stats
   const getStats = () => {
     const totalInvoices = invoices.length
-    const pendingInvoices = invoices.filter((inv) => inv.status === "pending").length
+    const pendingInvoices = invoices.filter((inv) => inv.status.toLowerCase() === "pending").length
     const totalAmount = invoices.reduce((sum, inv) => sum + (inv.total ?? 0), 0)
     const matchedInvoices = invoices.filter((inv) => inv.matched).length
 
