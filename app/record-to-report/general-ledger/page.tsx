@@ -64,12 +64,12 @@ export default function GeneralLedgerPage() {
     startDate: string;
     endDate: string;
     account: string;
-    status: JournalEntry["status"] | ""; // Allow empty string for initial state
+    status: JournalEntry["status"] | undefined;
   }>({
     startDate: "",
     endDate: "",
     account: "",
-    status: "",
+    status: undefined,
   })
   const [isLedgerMaintenanceOpen, setIsLedgerMaintenanceOpen] = useState(false)
   const [isNewAccountModalOpen, setIsNewAccountModalOpen] = useState(false)
@@ -103,7 +103,7 @@ export default function GeneralLedgerPage() {
             startDate: filterCriteria.startDate,
             endDate: filterCriteria.endDate,
             account: filterCriteria.account,
-            status: filterCriteria.status as JournalEntry["status"],
+            status: filterCriteria.status, // Now directly pass filterCriteria.status
           }),
         ])
 
@@ -186,7 +186,7 @@ export default function GeneralLedgerPage() {
             startDate: filterCriteria.startDate,
             endDate: filterCriteria.endDate,
             account: filterCriteria.account,
-            status: filterCriteria.status as JournalEntry["status"],
+            status: filterCriteria.status,
           }),
         ]);
         if (fetchedAccounts) setAccounts(fetchedAccounts);
@@ -233,7 +233,10 @@ export default function GeneralLedgerPage() {
         );
         setIsDetailsModalOpen(false);
         // Re-fetch data to update lists and balances
-        const fetchedEntries = await getJournalEntries(tenantId, filterCriteria as any);
+        const fetchedEntries = await getJournalEntries(tenantId, {
+            ...filterCriteria,
+            status: filterCriteria.status, // Now directly pass filterCriteria.status
+        });
         setJournalEntries(fetchedEntries);
       } else {
         // If result is null or status is not REVERSED, it's an error
@@ -504,7 +507,7 @@ export default function GeneralLedgerPage() {
       startDate: "",
       endDate: "",
       account: "",
-      status: "",
+      status: undefined,
     });
     // Clearing filter criteria will trigger the useEffect to re-fetch data
     setIsFilterModalOpen(false);

@@ -287,7 +287,7 @@ export async function createAccount(
  * @param tenantId The ID of the tenant.
  * @returns A promise that resolves to an array of AccountResponseBackend objects or null on error.
  */
-export async function getAccounts(tenantId: string): Promise<AccountResponseBackend[] | null> {
+export async function getAccounts(tenantId: string): Promise<AccountResponseBackend[]> {
     try {
         const accounts = await cachedFetch<AccountResponseBackend[]>(`accounts-${tenantId}`, async () => {
             const response = await fetch(`${BASE_URL}/accounts?tenant_id=${tenantId}`, {
@@ -306,7 +306,7 @@ export async function getAccounts(tenantId: string): Promise<AccountResponseBack
         return accounts;
     } catch (error) {
         console.error("Error in getAccounts:", error);
-        return null;
+        return []; // Return empty array on error
     }
 }
 
@@ -520,35 +520,30 @@ export async function createJournalEntry(
 
   if (!accountId) {
     console.error(`Account ID is missing.`);
-    return null;
+    throw new Error('Account ID is missing for journal entry creation.');
   }
   if (!journalTypeId) {
     console.error(`Journal type ID is missing.`);
-    return null;
+    throw new Error('Journal type ID is missing for journal entry creation.');
   }
 
   // Resolve fiscal_period_id from entry date
   const fiscalPeriodId = await getFiscalPeriodIdByDate(tenantId, journalEntryData.date);
   if (!fiscalPeriodId) {
     console.error(`Fiscal period not found for date '${journalEntryData.date}'.`);
-    return null; // Return null for component to handle error
+    throw new Error(`Fiscal period not found for date '${journalEntryData.date}'.`);
   }
 
   // Fetch accounts to find a "Cash" or "Bank" account for balancing
   const allAccounts = await getAccounts(tenantId);
-  if (!allAccounts) {
-    console.error("Failed to fetch accounts for balancing journal entry.");
-    return null;
-  }
-
+  // getAccounts now returns an empty array on error, so no need for null check here
   const cashAccount = allAccounts.find(account => 
     account.name.toLowerCase().includes("cash") || account.name.toLowerCase().includes("bank")
   );
 
   if (!cashAccount) {
     console.error("No suitable 'Cash' or 'Bank' account found for balancing.");
-    // Fallback: Could create a default suspense account or return error
-    return null;
+    throw new Error("No suitable 'Cash' or 'Bank' account found for balancing journal entry. Please configure one.");
   }
 
   const lines = [];
@@ -602,15 +597,19 @@ export async function createJournalEntry(
     journal_type_id: journalTypeId,
     fiscal_period_id: fiscalPeriodId,
     entry_number: `JE-${Date.now()}`, // Simple unique entry number
-    entry_date: journalEntryData.date,
+    entry_date: new Date(journalEntryData.date).toISOString(), // Format date to ISO 8601 with Z for UTC
     description: journalEntryData.description,
     reference: journalEntryData.reference,
     source: "Frontend", // Source of the entry
     status: "DRAFT", // Initial status
     is_recurring: false,
     is_auto_generated: false,
+    is_adjustment: true, // Assuming manual entries are adjustments
+    metadata: {}, // Ensure metadata is always an empty dictionary if not provided
     lines: lines, // Use the constructed two-line array
   };
+
+  console.log("Sending Journal Entry Payload:", JSON.stringify(payload, null, 2)); // Log the payload
 
   try {
     const response = await fetch(`${BASE_URL}/journal-entries`, {
@@ -625,14 +624,14 @@ export async function createJournalEntry(
     if (!response.ok) {
       const errorText = await response.text();
       console.error("Failed to create journal entry:", errorText);
-      return null; // Return null for component to handle error
+      throw new Error(`Failed to create journal entry: ${response.status} ${response.statusText} - ${errorText}`);
     }
 
     const createdEntry: JournalEntryResponseBackend = await response.json();
     return createdEntry;
   } catch (error) {
     console.error("Error creating journal entry:", error);
-    return null;
+    throw error;
   }
 }
 
@@ -668,31 +667,26 @@ export async function updateJournalEntry(
   const fiscalPeriodId = await getFiscalPeriodIdByDate(tenantId, entryData.date);
   if (!fiscalPeriodId) {
     console.error(`Fiscal period not found for date '${entryData.date}'.`);
-    return null; // Return null for component to handle error
+    throw new Error(`Fiscal period not found for date '${entryData.date}'.`);
   }
 
   // Convert account name to account ID for the primary account
   const primaryAccountId = accountNameToIdMap.get(entryData.account);
   if (!primaryAccountId) {
     console.error(`Account name '${entryData.account}' not found. Cannot update journal entry.`);
-    return null;
+    throw new Error(`Account name '${entryData.account}' not found. Cannot update journal entry.`);
   }
 
   // Fetch accounts to find a "Cash" or "Bank" account for balancing
   const allAccounts = await getAccounts(tenantId);
-  if (!allAccounts) {
-    console.error("Failed to fetch accounts for balancing journal entry.");
-    return null;
-  }
-
+  // getAccounts now returns an empty array on error, so no need for null check here
   const cashAccount = allAccounts.find(account => 
     account.name.toLowerCase().includes("cash") || account.name.toLowerCase().includes("bank")
   );
 
   if (!cashAccount) {
     console.error("No suitable 'Cash' or 'Bank' account found for balancing.");
-    // Fallback: Could create a default suspense account or return error
-    return null;
+    throw new Error("No suitable 'Cash' or 'Bank' account found for balancing journal entry. Please configure one.");
   }
 
   const lines = [];
@@ -746,13 +740,15 @@ export async function updateJournalEntry(
     journal_type_id: entryData.journal_type_id,
     fiscal_period_id: fiscalPeriodId,
     entry_number: `JE-${Date.now()}-UPD`, // Simple unique entry number for update
-    entry_date: entryData.date,
+    entry_date: new Date(entryData.date).toISOString(), // Ensure ISO format for update
     description: entryData.description,
     reference: entryData.reference,
     source: "Frontend-Edit", // Source of the entry
     status: "DRAFT", // Status after edit
     is_recurring: false,
     is_auto_generated: false,
+    is_adjustment: true, // Assuming manual entries are adjustments
+    metadata: {}, // Ensure metadata is always an empty dictionary if not provided
     lines: lines, // Use the constructed two-line array
   };
 
@@ -769,15 +765,15 @@ export async function updateJournalEntry(
     if (!response.ok) {
       const errorText = await response.text();
       console.error("Failed to update journal entry:", errorText);
-      return null; // Return null for component to handle error
+      throw new Error(`Failed to update journal entry: ${response.status} ${response.statusText} - ${errorText}`);
     }
 
     const updatedEntry: JournalEntryResponseBackend = await response.json();
     return updatedEntry;
   } catch (error) {
     console.error("Error updating journal entry:", error);
-    return null;
-    }
+    throw error;
+  }
 }
 
 /**

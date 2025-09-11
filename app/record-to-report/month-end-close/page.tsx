@@ -139,12 +139,14 @@ class GLAPIService {
 
   // Journal Entry APIs
   async createJournalEntry(entryData: any): Promise<any> {
+    const payload = {
+      ...entryData,
+      tenant_id: this.tenantId,
+    };
+    console.log("Sending Journal Entry Payload (from page.tsx):", JSON.stringify(payload, null, 2));
     return this.request('/journal-entries', {
       method: 'POST',
-      body: JSON.stringify({
-        ...entryData,
-        tenant_id: this.tenantId,
-      }),
+      body: JSON.stringify(payload),
     })
   }
 
@@ -186,6 +188,52 @@ class GLAPIService {
 
   async getAccounts(): Promise<any[]> {
     return this.request(`/accounts?tenant_id=${this.tenantId}`)
+  }
+
+  async getAccountTypes(): Promise<any[]> {
+    return this.request(`/account-types?tenant_id=${this.tenantId}`)
+  }
+
+  async getJournalTypes(): Promise<any[]> {
+    return this.request(`/journal-types?tenant_id=${this.tenantId}`)
+  }
+
+  async createAccount(accountData: any): Promise<any> {
+    return this.request('/accounts', {
+      method: 'POST',
+      body: JSON.stringify({
+        ...accountData,
+        tenant_id: this.tenantId,
+      }),
+    })
+  }
+
+  async createJournalType(journalTypeData: any): Promise<any> {
+    return this.request('/journal-types', {
+      method: 'POST',
+      body: JSON.stringify({
+        ...journalTypeData,
+        tenant_id: this.tenantId,
+      }),
+    })
+  }
+
+  async createAccountType(accountTypeData: any): Promise<any> {
+    return this.request('/account-types', {
+      method: 'POST',
+      body: JSON.stringify({
+        ...accountTypeData,
+        tenant_id: this.tenantId,
+      }),
+    })
+  }
+
+  async triggerPeriodClose(fiscalPeriodId: string): Promise<any> {
+    // Modify to send as query parameters
+    return this.request(`/trigger-period-close?tenant_id=${this.tenantId}&fiscal_period_id=${fiscalPeriodId}`, {
+      method: 'POST',
+      // No body needed as parameters are in the URL
+    })
   }
 }
 
@@ -231,6 +279,7 @@ export default function MonthEndClosePage() {
   const [glAccounts, setGLAccounts] = useState<GLAccount[]>([])
   const [financialReports, setFinancialReports] = useState<Record<string, FinancialReport | undefined>>({})
   const [fiscalPeriods, setFiscalPeriods] = useState<any[]>([])
+  const [manualJournalTypeId, setManualJournalTypeId] = useState<string | null>(null)
 
   // Load initial data
   useEffect(() => {
@@ -276,6 +325,17 @@ export default function MonthEndClosePage() {
       const accounts = await apiService.getGLAccounts()
       setGLAccounts(accounts)
 
+      // Ensure required GL accounts exist
+      await ensureGLAccountsExist()
+
+      // Ensure manual journal type exists
+      const manualJournalTypeId = await ensureJournalTypeExists()
+      if (manualJournalTypeId) {
+        setManualJournalTypeId(manualJournalTypeId)
+      } else {
+        throw new Error("Failed to ensure 'manual-entry' journal type exists.")
+      }
+
       // Load unreconciled transactions
       await loadUnreconciledTransactions()
 
@@ -297,6 +357,119 @@ export default function MonthEndClosePage() {
       setUnreconciledTransactions(transactions)
     } catch (err) {
       console.error('Failed to load unreconciled transactions:', err)
+    }
+  }
+
+  const ensureGLAccountsExist = async () => {
+    try {
+      // First, ensure all required AccountTypes exist
+      const requiredAccountTypes = [
+        { name: "Asset", code: "ASSET", normalBalance: "DEBIT" },
+        { name: "Liability", code: "LIABILITY", normalBalance: "CREDIT" },
+        { name: "Equity", code: "EQUITY", normalBalance: "CREDIT" },
+        { name: "Revenue", code: "REVENUE", normalBalance: "CREDIT" },
+        { name: "Expense", code: "EXPENSE", normalBalance: "DEBIT" },
+      ]
+
+      let currentAccountTypes = await apiService.getAccountTypes()
+      console.log("Initial Fetched Account Types:", currentAccountTypes) // DEBUG LOG
+
+      for (const reqType of requiredAccountTypes) {
+        const foundType = currentAccountTypes.find(
+          (type: any) => type.code === reqType.code || type.name === reqType.name
+        )
+        if (!foundType) {
+          console.log(`Creating missing Account Type: ${reqType.name} (Code: ${reqType.code})`)
+          await apiService.createAccountType({
+            name: reqType.name,
+            code: reqType.code,
+            normal_balance: reqType.normalBalance,
+            is_active: true,
+            tenant_id: "default",
+          })
+        }
+      }
+      // Re-fetch account types after ensuring all exist
+      currentAccountTypes = await apiService.getAccountTypes()
+      console.log("Refetched Account Types after creation:", currentAccountTypes) // DEBUG LOG
+
+
+      const existingAccounts = await apiService.getAccounts()
+      console.log("Fetched Existing Accounts:", existingAccounts) // DEBUG LOG
+
+      const requiredAccounts = [
+        { name: "Accrued Expenses", accountNumber: "2100", typeName: "Liability", typeCode: "LIABILITY", normalBalance: "CREDIT" },
+        { name: "General Expenses", accountNumber: "5000", typeName: "Expense", typeCode: "EXPENSE", normalBalance: "DEBIT" },
+        { name: "Deferred Revenue", accountNumber: "2200", typeName: "Liability", typeCode: "LIABILITY", normalBalance: "CREDIT" },
+        { name: "Sales Revenue", accountNumber: "4000", typeName: "Revenue", typeCode: "REVENUE", normalBalance: "CREDIT" },
+      ]
+
+      for (const reqAcc of requiredAccounts) {
+        const foundAccount = existingAccounts.find(
+          (acc: any) => acc.account_number === reqAcc.accountNumber
+        )
+
+        if (!foundAccount) {
+          const accountType = currentAccountTypes.find((type: any) => type.code === reqAcc.typeCode || type.name === reqAcc.typeName)
+          if (accountType) {
+            console.log(`Creating missing GL account: ${reqAcc.name} (Type: ${accountType.name}, ID: ${accountType.id})`)
+            await apiService.createAccount({
+              account_number: reqAcc.accountNumber,
+              name: reqAcc.name,
+              description: `Auto-created ${reqAcc.name} account`,
+              account_type_id: accountType.id,
+              is_active: true,
+              is_control_account: false,
+              tenant_id: "default",
+            })
+          } else {
+            console.warn(`Account type ${reqAcc.typeName} (code: ${reqAcc.typeCode}) not found for ${reqAcc.name}. Cannot auto-create account.`)
+          }
+        }
+      }
+      // Reload GL accounts after ensuring they exist
+      const updatedAccounts = await apiService.getGLAccounts()
+      setGLAccounts(updatedAccounts)
+
+    } catch (err) {
+      console.error('Failed to ensure GL accounts exist:', err)
+      toast({
+        title: "Error",
+        description: "Failed to ensure required GL accounts exist. Please check the GL service and account configurations.",
+        variant: "destructive",
+      })
+      throw err
+    }
+  }
+
+  const ensureJournalTypeExists = async (): Promise<string | null> => {
+    try {
+      const journalTypes = await apiService.getJournalTypes()
+      const manualEntryType = journalTypes.find(
+        (jt: any) => jt.code === "manual-entry" || jt.name === "Manual Entry"
+      )
+
+      if (manualEntryType) {
+        return manualEntryType.id
+      } else {
+        console.log("Creating missing 'Manual Entry' journal type.")
+        const newJournalType = await apiService.createJournalType({
+          name: "Manual Entry",
+          code: "manual-entry",
+          description: "Journal type for manual adjustments and accruals.",
+          is_active: true,
+          tenant_id: "default",
+        })
+        return newJournalType.id
+      }
+    } catch (err) {
+      console.error("Failed to ensure 'manual-entry' journal type exists:", err)
+      toast({
+        title: "Error",
+        description: "Failed to ensure 'manual-entry' journal type exists. Please check the GL service.",
+        variant: "destructive",
+      })
+      throw err
     }
   }
 
@@ -325,14 +498,14 @@ export default function MonthEndClosePage() {
     {
       id: "step-4",
       name: "Expense Accruals",
-      status: "pending",
+      status: "pending", // Force to pending for testing
       description: "Record accruals for expenses incurred but not yet invoiced",
       apiEndpoint: "/journal-entries",
     },
     {
       id: "step-5",
       name: "Revenue Recognition",
-      status: "pending",
+      status: "pending", // Force to pending for testing
       description: "Ensure all revenue is properly recognized for the period",
       apiEndpoint: "/journal-entries",
     },
@@ -414,7 +587,9 @@ export default function MonthEndClosePage() {
     const bankTransactions = unreconciledTransactions.filter(t => t.type === 'BANK_TRANSACTION')
 
     if (bankTransactions.length === 0) {
-      throw new Error('No unreconciled bank transactions found')
+      // If no unreconciled bank transactions, consider the step as completed successfully
+      console.log('No unreconciled bank transactions found. Skipping reconciliation.')
+      return
     }
 
     // Get reconciliation suggestions for each transaction
@@ -495,24 +670,44 @@ export default function MonthEndClosePage() {
     if (!currentPeriod) return
 
     // Find appropriate GL accounts for accruals
-    const accruedExpensesAccount = glAccounts.find(acc => acc.account_number.startsWith('2') && acc.name.toLowerCase().includes('accrued'))
-    const expenseAccount = glAccounts.find(acc => acc.account_number.startsWith('5') || acc.account_number.startsWith('6'))
+    let accruedExpensesAccount = glAccounts.find(acc => acc.account_number.startsWith('2') && acc.name.toLowerCase().includes('accrued'))
+    let expenseAccount = glAccounts.find(acc => acc.account_number.startsWith('5') || acc.account_number.startsWith('6'))
+
+    // Re-fetch if not found, similar to revenue recognition
+    if (!accruedExpensesAccount || !expenseAccount) {
+      console.log("Accrual accounts not found initially, re-fetching...") // DEBUG LOG
+      const updatedGLAccounts = await apiService.getGLAccounts()
+      setGLAccounts(updatedGLAccounts) // Update state
+      accruedExpensesAccount = updatedGLAccounts.find(acc => acc.account_number.startsWith('2') && acc.name.toLowerCase().includes('accrued'))
+      expenseAccount = updatedGLAccounts.find(acc => acc.account_number.startsWith('5') || acc.account_number.startsWith('6'))
+    }
 
     if (!accruedExpensesAccount || !expenseAccount) {
-      throw new Error('Required GL accounts for expense accruals not found. Please configure accrued expenses and expense accounts.')
+      throw new Error('Required GL accounts for expense accruals not found after re-check. Please configure accrued expenses and expense accounts.')
+    }
+
+    console.log("Accrued Expenses Account ID:", accruedExpensesAccount.id) // DEBUG LOG
+    console.log("Expense Account ID:", expenseAccount.id) // DEBUG LOG
+
+    if (!accruedExpensesAccount.id || !expenseAccount.id) {
+      throw new Error("One or both required account IDs are missing for Expense Accruals.")
     }
 
     // Calculate accrual amount (this would typically come from business logic)
     const accrualAmount = 5000.00
 
+    console.log("Executing Expense Accruals. Current glAccounts:", glAccounts) // DEBUG LOG
+    console.log("Accrual entry manualJournalTypeId:", manualJournalTypeId) // DEBUG LOG
+
     const accrualEntry = {
-      journal_type_id: "manual-entry", // Use a standard journal type
+      journal_type_id: manualJournalTypeId, // Use the dynamically fetched ID
       fiscal_period_id: currentPeriod.fiscalPeriodId,
       entry_number: `ACCRUAL-${Date.now()}`,
-      entry_date: new Date().toISOString().split('T')[0],
+      entry_date: new Date().toISOString().slice(0, 19), // Use YYYY-MM-DDTHH:MM:SS format
       description: "Monthly expense accruals",
       reference: "MONTH-END-ACCRUAL",
       source: "MANUAL",
+      is_adjustment: true, // Mark as adjustment
       lines: [
         {
           account_id: accruedExpensesAccount.id,
@@ -532,6 +727,9 @@ export default function MonthEndClosePage() {
     }
 
     const createdEntry = await apiService.createJournalEntry(accrualEntry)
+    if (!createdEntry) {
+        throw new Error("Failed to create expense accrual journal entry.");
+    }
     await apiService.postJournalEntry(createdEntry.id)
   }
 
@@ -539,24 +737,41 @@ export default function MonthEndClosePage() {
     if (!currentPeriod) return
 
     // Find appropriate GL accounts for revenue recognition
-    const deferredRevenueAccount = glAccounts.find(acc => acc.account_number.startsWith('2') && acc.name.toLowerCase().includes('deferred'))
-    const revenueAccount = glAccounts.find(acc => acc.account_number.startsWith('4') && acc.name.toLowerCase().includes('revenue'))
+    let deferredRevenueAccount = glAccounts.find(acc => acc.account_number.startsWith('2') && acc.name.toLowerCase().includes('deferred'))
+    let revenueAccount = glAccounts.find(acc => acc.account_number.startsWith('4') && acc.name.toLowerCase().includes('revenue'))
+
+    // If accounts are not found, it's possible glAccounts state is not fully updated.
+    // Re-fetch and try again.
+    if (!deferredRevenueAccount || !revenueAccount) {
+      const updatedGLAccounts = await apiService.getGLAccounts()
+      setGLAccounts(updatedGLAccounts) // Update state
+      deferredRevenueAccount = updatedGLAccounts.find(acc => acc.account_number.startsWith('2') && acc.name.toLowerCase().includes('deferred'))
+      revenueAccount = updatedGLAccounts.find(acc => acc.account_number.startsWith('4') && acc.name.toLowerCase().includes('revenue'))
+    }
 
     if (!deferredRevenueAccount || !revenueAccount) {
-      throw new Error('Required GL accounts for revenue recognition not found. Please configure deferred revenue and revenue accounts.')
+      throw new Error('Required GL accounts for revenue recognition not found after re-check. Please configure deferred revenue and revenue accounts.')
     }
 
     // Calculate recognition amount (this would typically come from business logic)
     const recognitionAmount = 7500.00
 
+    console.log("Executing Revenue Recognition. Current glAccounts:", glAccounts) // DEBUG LOG
+    console.log("Revenue entry manualJournalTypeId:", manualJournalTypeId) // DEBUG LOG
+
+    if (!deferredRevenueAccount.id || !revenueAccount.id) {
+      throw new Error("One or both required account IDs are missing for Revenue Recognition.")
+    }
+
     const revenueEntry = {
-      journal_type_id: "manual-entry", // Use a standard journal type
+      journal_type_id: manualJournalTypeId, // Use the dynamically fetched ID
       fiscal_period_id: currentPeriod.fiscalPeriodId,
       entry_number: `REVENUE-${Date.now()}`,
-      entry_date: new Date().toISOString().split('T')[0],
+      entry_date: new Date().toISOString(), // Use full ISO string for datetime field
       description: "Revenue recognition adjustments",
       reference: "MONTH-END-REVENUE",
       source: "MANUAL",
+      is_adjustment: true, // Mark as adjustment
       lines: [
         {
           account_id: deferredRevenueAccount.id,
@@ -576,6 +791,9 @@ export default function MonthEndClosePage() {
     }
 
     const createdEntry = await apiService.createJournalEntry(revenueEntry)
+    if (!createdEntry) {
+        throw new Error("Failed to create revenue recognition journal entry.");
+    }
     await apiService.postJournalEntry(createdEntry.id)
   }
 
@@ -615,7 +833,10 @@ export default function MonthEndClosePage() {
     // For now, we'll just mark it as closed
 
     // This would require a new API endpoint for period closure
-    // await apiService.closePeriod(currentPeriod.fiscalPeriodId)
+    if (!currentPeriod.fiscalPeriodId) {
+      throw new Error("Fiscal Period ID is missing for period closure.")
+    }
+    await apiService.triggerPeriodClose(currentPeriod.fiscalPeriodId)
 
     setCurrentPeriod(prev => ({
       ...prev!,
@@ -664,33 +885,30 @@ export default function MonthEndClosePage() {
   }
 
   // Handle approve close
-  const handleApproveClose = () => {
+  const handleApproveClose = async () => { // Made async
     if (!currentPeriod) return
 
-    setCurrentPeriod((prevPeriod) => ({
-      ...prevPeriod!,
-      status: "closed",
-      progress: 100,
-      steps: prevPeriod!.steps.map(step => ({ ...step, status: "completed", completedBy: "System", completedAt: new Date().toISOString() }))
-    }))
+    try {
+      setLoading(true)
+      // Call executePeriodClosure which now triggers the backend
+      await executePeriodClosure()
 
-    // Update the period in closePeriods as well
-    setClosePeriods(prev => prev.map(period =>
-      period.id === currentPeriod.id
-        ? {
-            ...period,
-            status: "closed",
-            progress: 100,
-            steps: period.steps.map(step => ({ ...step, status: "completed", completedBy: "System", completedAt: new Date().toISOString() }))
-          }
-        : period
-    ))
-
-    toast({
-      title: "Period Closed",
-      description: `The period ${currentPeriod.name} has been successfully closed.`,
-    })
-    setIsConfirmModalOpen(false)
+      toast({
+        title: "Period Closed",
+        description: `The period ${currentPeriod.name} has been successfully closed.`,
+      })
+      setIsConfirmModalOpen(false)
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error occurred'
+      setError(errorMessage)
+      toast({
+        title: "Error",
+        description: `Failed to close period: ${errorMessage}`,
+        variant: "destructive",
+      })
+    } finally {
+      setLoading(false)
+    }
   }
 
   const handleSelectPeriod = (period: ClosePeriod) => {
@@ -799,7 +1017,7 @@ export default function MonthEndClosePage() {
                   setSelectedPeriod(currentPeriod)
                   setIsConfirmModalOpen(true)
                 }}
-                disabled={currentPeriod.progress < 100 || loading}
+                disabled={currentPeriod.progress < 100 || loading || currentPeriod.status === "closed"}
               >
                 <CheckCircle className="mr-2 h-4 w-4" />
                 Approve Close
@@ -932,10 +1150,6 @@ export default function MonthEndClosePage() {
                 </span>
               </div>
               <div className="flex items-center gap-2">
-                <CheckCircle className="h-4 w-4 text-teal-500" />
-                <span className="text-sm">
-                  API Connected
-                </span>
               </div>
             </div>
           </CardContent>
