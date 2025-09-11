@@ -36,6 +36,7 @@ interface ServerMessage {
     status?: string
     message?: string
     timestamp?: string
+    code?: string
   }
 }
 
@@ -363,10 +364,43 @@ export function ChatWidget({ onClose }: ChatWidgetProps) {
         break
 
       case "error":
-        console.error("Chat service error:", data.data?.message || "Unknown error")
+        console.error("Chat service error:", data.data?.message || "Unknown error", "Code:", data.data?.code)
+
+        let errorContent = "❌ An error occurred while processing your request."
+        const errorCode = data.data?.code
+
+        // Provide specific error messages based on error codes
+        switch (errorCode) {
+          case "VOICE_SERVICE_UNAVAILABLE":
+            errorContent = "❌ Voice service is currently unavailable. Please try again later or use text input."
+            setIsVoiceMode(false)
+            setVoiceStatus("idle")
+            break
+          case "EMPTY_AUDIO":
+            errorContent = "❌ No audio data was captured. Please try recording again."
+            break
+          case "UNSUPPORTED_AUDIO_FORMAT":
+            errorContent = "❌ Audio format not supported. Please ensure your microphone is working properly."
+            break
+          case "AUDIO_PROCESSING_ERROR":
+            errorContent = "❌ Failed to process audio. Please try again."
+            break
+          case "VOICE_CONNECTION_LOST":
+            errorContent = "❌ Voice connection lost. Please restart voice mode."
+            setIsVoiceMode(false)
+            setVoiceStatus("idle")
+            break
+          case "CONNECTION_ERROR":
+            errorContent = "❌ Connection error. The chat service may be temporarily unavailable."
+            setConnectionStatus("error")
+            break
+          default:
+            errorContent = `❌ Error: ${data.data?.message || "Unknown error occurred"}`
+        }
+
         const errorMessage: Message = {
           id: Date.now().toString(),
-          content: `❌ Error: ${data.data?.message || "Unknown error occurred"}`,
+          content: errorContent,
           sender: "ai",
           timestamp: new Date(),
           type: "text"
@@ -542,9 +576,53 @@ export function ChatWidget({ onClose }: ChatWidgetProps) {
       </div>
 
       {/* Connection Status */}
-      <div className="px-4 py-2 text-sm text-gray-600 bg-gray-50">
-        Status: {connectionStatus}
+      <div className={`px-4 py-2 text-sm bg-gray-50 border-l-4 ${
+        connectionStatus === 'connected' ? 'border-green-500 text-green-700' :
+        connectionStatus === 'connecting' ? 'border-yellow-500 text-yellow-700' :
+        connectionStatus === 'error' ? 'border-red-500 text-red-700' :
+        'border-gray-500 text-gray-600'
+      }`}>
+        <div className="flex items-center gap-2">
+          <div className={`w-2 h-2 rounded-full ${
+            connectionStatus === 'connected' ? 'bg-green-500' :
+            connectionStatus === 'connecting' ? 'bg-yellow-500 animate-pulse' :
+            connectionStatus === 'error' ? 'bg-red-500' :
+            'bg-gray-500'
+          }`} />
+          Status: {connectionStatus === 'connected' ? 'Connected' :
+                   connectionStatus === 'connecting' ? 'Connecting...' :
+                   connectionStatus === 'error' ? 'Connection Error' :
+                   'Disconnected'}
+          {reconnectAttempts > 0 && (
+            <span className="text-xs text-gray-500">
+              (Attempt {reconnectAttempts + 1}/{maxReconnectAttempts})
+            </span>
+          )}
+        </div>
       </div>
+
+      {/* Voice Status - only show when voice mode is active */}
+      {isVoiceMode && (
+        <div className={`px-4 py-1 text-xs border-l-4 ${
+          voiceStatus === 'listening' ? 'border-blue-500 text-blue-700 bg-blue-50' :
+          voiceStatus === 'processing' ? 'border-orange-500 text-orange-700 bg-orange-50' :
+          voiceStatus === 'speaking' ? 'border-purple-500 text-purple-700 bg-purple-50' :
+          'border-gray-500 text-gray-600 bg-gray-50'
+        }`}>
+          <div className="flex items-center gap-2">
+            <div className={`w-1.5 h-1.5 rounded-full ${
+              voiceStatus === 'listening' ? 'bg-blue-500 animate-pulse' :
+              voiceStatus === 'processing' ? 'bg-orange-500 animate-spin' :
+              voiceStatus === 'speaking' ? 'bg-purple-500' :
+              'bg-gray-500'
+            }`} />
+            Voice: {voiceStatus === 'listening' ? 'Listening...' :
+                    voiceStatus === 'processing' ? 'Processing...' :
+                    voiceStatus === 'speaking' ? 'Speaking...' :
+                    'Ready'}
+          </div>
+        </div>
+      )}
 
       {/* Messages */}
       <ScrollArea className="flex-1 p-4">
