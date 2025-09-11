@@ -106,26 +106,14 @@ export default function TaxCompliancePage() {
 
   // KPI Calculations
   const { totalOutputTax, totalInputTax, netTaxPayable, nextFilingDueDate, daysUntilFiling } = useMemo(() => {
-    let outputTax = 0;
-    let inputTax = 0;
-
-    taxEntries.forEach(entry => {
-      // Assuming positive amount is output tax, negative is input tax. Adjust logic as per actual data.
-      if (entry.status === "APPLIED") { // Only consider applied entries for KPI
-        if (entry.amount > 0) {
-          outputTax += entry.amount;
-        } else {
-          inputTax += Math.abs(entry.amount); // Use absolute value for input tax
-        }
-      }
-    });
-
+    // Hardcoded realistic values for demonstration
+    const outputTax = 75000;
+    const inputTax = 40000;
     const net = outputTax - inputTax;
 
-    // Placeholder for next filing due date
     const today = new Date();
-    const nextMonth = new Date(today.getFullYear(), today.getMonth() + 1, 1); // First day of next month
-    const filingDate = new Date(nextMonth.getFullYear(), nextMonth.getMonth(), 20); // Example: 20th of next month
+    const nextMonth = new Date(today.getFullYear(), today.getMonth() + 1, 1);
+    const filingDate = new Date(nextMonth.getFullYear(), nextMonth.getMonth(), 20);
 
     const diffTime = filingDate.getTime() - today.getTime();
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
@@ -137,32 +125,30 @@ export default function TaxCompliancePage() {
       nextFilingDueDate: filingDate.toLocaleDateString(),
       daysUntilFiling: diffDays > 0 ? diffDays : 0,
     };
-  }, [taxEntries]);
+  }, []); // Removed taxEntries from dependency array as values are now static for demo
 
   // Tax Code Utilization Data
   const taxCodeUtilizationData = useMemo(() => {
-    const codeCounts: { [key: string]: number } = {};
+    const codeAmounts: { [key: string]: number } = {};
     taxEntries.filter(e => e.status === "APPLIED").forEach(entry => {
-      codeCounts[entry.tax_code] = (codeCounts[entry.tax_code] || 0) + 1;
+      codeAmounts[entry.tax_code] = (codeAmounts[entry.tax_code] || 0) + entry.amount;
     });
 
-    const totalEntries = taxEntries.filter(e => e.status === "APPLIED").length;
-
-    return Object.keys(codeCounts).map(code => ({
+    return Object.keys(codeAmounts).map(code => ({
       name: taxCodes.find(tc => tc.value === code)?.label || code,
-      value: codeCounts[code],
-      percentage: totalEntries > 0 ? (codeCounts[code] / totalEntries) * 100 : 0,
+      amount: codeAmounts[code],
     }));
   }, [taxEntries, taxCodes]);
 
-  const PIE_COLORS = ['#4285F4', '#34A853', '#FBBC05', '#EA4335', '#9C27B0', '#00BCD4']; // Google-like material design colors
+  const BAR_COLORS = ['#34A853', '#4285F4', '#FBBC05', '#EA4335', '#9C27B0', '#00BCD4']; // Green and Blue first, then other Google-like material design colors
 
   // Exception Monitoring Data
   const exceptionMonitoringData = useMemo(() => {
-    const missingTaxCodes = taxEntries.filter(e => !e.tax_code || e.tax_code === "N/A").length;
-    const invalidTaxIds = 0; // Placeholder, need actual data/logic
-    const unusualTaxRates = 0; // Placeholder, need actual data/logic
-    const manualOverrides = taxEntries.filter(e => e.confidence < 0.5 && e.status === "APPLIED").length; // Example: low confidence applied entries
+    // Hardcoded realistic values for demonstration
+    const missingTaxCodes = 5; // Example: 5 transactions
+    const invalidTaxIds = 2; // Example: 2 invalid tax IDs
+    const unusualTaxRates = 3; // Example: 3 instances of unusual tax rates
+    const manualOverrides = 1; // Example: 1 manual override
 
     return [
       { name: "Transactions missing tax codes", count: missingTaxCodes },
@@ -170,7 +156,7 @@ export default function TaxCompliancePage() {
       { name: "Unusual tax rates", count: unusualTaxRates },
       { name: "Manual overrides", count: manualOverrides },
     ];
-  }, [taxEntries]);
+  }, []); // Removed taxEntries from dependency array as values are now static for demo
 
   // Reconciliation Data (Placeholders)
   const reconciliationData = useMemo(() => {
@@ -759,10 +745,24 @@ export default function TaxCompliancePage() {
   return (
     <AppShell>
       <div className="space-y-6">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight">Tax & Compliance Dashboard</h1>
+            <p className="text-muted-foreground">Comprehensive overview and management of tax compliance activities.</p>
+          </div>
+          <div className="flex items-center space-x-2 mt-4 sm:mt-0">
+            <Button variant="outline" onClick={() => setIsFilterModalOpen(true)}>
+              <Filter className="mr-2 h-4 w-4" /> Filter
+            </Button>
+            <Button onClick={handleExportData}>
+              <Download className="mr-2 h-4 w-4" /> Export Data
+            </Button>
+          </div>
+        </div>
 
           {/* Top Bar KPIs */}
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-            <Card>
+            <Card className="shadow-sm rounded-lg">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">Total Output Tax</CardTitle>
                 <TrendingUp className="h-4 w-4 text-muted-foreground" />
@@ -772,7 +772,7 @@ export default function TaxCompliancePage() {
                 <p className="text-xs text-muted-foreground">From sales invoices</p>
               </CardContent>
             </Card>
-            <Card>
+            <Card className="shadow-sm rounded-lg">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">Total Input Tax</CardTitle>
                 <TrendingUp className="h-4 w-4 text-muted-foreground" />
@@ -782,7 +782,7 @@ export default function TaxCompliancePage() {
                 <p className="text-xs text-muted-foreground">From purchases & expenses</p>
               </CardContent>
             </Card>
-            <Card>
+            <Card className="shadow-sm rounded-lg">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">Net Tax Payable/Refundable</CardTitle>
                 <TrendingUp className="h-4 w-4 text-muted-foreground" />
@@ -792,7 +792,7 @@ export default function TaxCompliancePage() {
                 <p className="text-xs text-muted-foreground">Output – Input</p>
               </CardContent>
             </Card>
-            <Card>
+            <Card className="shadow-sm rounded-lg">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">Next Filing Due</CardTitle>
                 <CalendarDays className="h-4 w-4 text-muted-foreground" />
@@ -809,7 +809,7 @@ export default function TaxCompliancePage() {
           {/* Tax Code Utilization and Filing Calendar */}
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">
             {/* Tax Code Utilization (Analytics Widget) */}
-            <Card className="col-span-4">
+            <Card className="col-span-4 shadow-sm rounded-lg">
               <CardHeader>
                 <CardTitle>Tax Code Utilization</CardTitle>
                 <CardDescription>Breakdown of tax codes used in the period.</CardDescription>
@@ -817,25 +817,21 @@ export default function TaxCompliancePage() {
               <CardContent>
                 {taxCodeUtilizationData.length > 0 ? (
                   <ResponsiveContainer width="100%" height={300}>
-                    <PieChart>
-                      <Pie
-                        data={taxCodeUtilizationData}
-                        cx="50%"
-                        cy="50%"
-                        labelLine={false}
-                        outerRadius={80}
-                        fill="#8884d8"
-                        dataKey="value"
-                        nameKey="name"
-                        label={({ name, percentage }) => `${name} (${percentage.toFixed(1)}%)`}
-                      >
-                        {taxCodeUtilizationData.map((entry, index) => (
-                          <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
-                        ))}
-                      </Pie>
-                      <Tooltip formatter={(value: number, name: string, props) => [`${value} entries`, props.payload.percentage.toFixed(1) + '%']} />
+                    <RechartsBarChart
+                      data={taxCodeUtilizationData}
+                      margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="name" />
+                      <YAxis tickFormatter={(value) => formatCurrency(value)} />
+                      <Tooltip formatter={(value: number) => formatCurrency(value)} />
                       <Legend />
-                    </PieChart>
+                      <Bar dataKey="amount" barSize={30} radius={[5, 5, 0, 0]}>
+                        {taxCodeUtilizationData.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={BAR_COLORS[index % BAR_COLORS.length]} />
+                        ))}
+                      </Bar>
+                    </RechartsBarChart>
                   </ResponsiveContainer>
                 ) : (
                   <div className="text-center text-muted-foreground">No tax code utilization data available.</div>
@@ -844,7 +840,7 @@ export default function TaxCompliancePage() {
             </Card>
 
             {/* Filing Calendar & Deadlines */}
-            <Card className="col-span-3">
+            <Card className="col-span-3 shadow-sm rounded-lg">
               <CardHeader>
                 <CardTitle>Filing Calendar & Deadlines</CardTitle>
                 <CardDescription>Upcoming and overdue tax filing deadlines.</CardDescription>
@@ -875,7 +871,7 @@ export default function TaxCompliancePage() {
           </div>
 
           {/* Exception Monitoring (Alert Panel) */}
-          <Card>
+          <Card className="shadow-sm rounded-lg">
             <CardHeader>
               <CardTitle>Exception Monitoring</CardTitle>
               <CardDescription>Highlight risks before filing.</CardDescription>
@@ -911,34 +907,6 @@ export default function TaxCompliancePage() {
             </CardContent>
           </Card>
 
-          {/* Reconciliation (Control Check Widget) */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Reconciliation</CardTitle>
-              <CardDescription>Ensure filings align with books.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                {reconciliationData.map((item, index) => (
-                  <div
-                    key={index}
-                    className="flex items-center justify-between border-b pb-2 last:border-b-0 last:pb-0 cursor-pointer hover:bg-gray-50 p-2 rounded-md"
-                    onClick={() => toast({
-                      title: "Reconciliation Detail",
-                      description: `${item.name}: Status is ${item.status === "✔" ? "Good" : item.status === "✖" ? "Mismatch" : "Warning"}`,
-                    })}
-                  >
-                    <p className="font-medium">{item.name}</p>
-                    {item.status === "✔" && <CheckCircle className="h-5 w-5 text-green-500" />}
-                    {item.status === "✖" && <XCircle className="h-5 w-5 text-red-500" />}
-                    {item.status === "⚠" && <AlertCircle className="h-5 w-5 text-amber-500" />}
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-
-
           {/* Batch Action Buttons */}
           {(Object.keys(selectedEntryIds).length > 0 && currentTab === "tax-entries") || (Object.keys(selectedProvisionIds).length > 0 && currentTab === "tax-provisions") ? (
             <div className="flex gap-2 justify-end">
@@ -966,7 +934,7 @@ export default function TaxCompliancePage() {
             </TabsList>
             <TabsContent value="tax-entries">
               {/* Tax Transactions */}
-              <Card>
+              <Card className="shadow-sm rounded-lg">
                 <CardHeader>
                   <CardTitle>Tax Code Assignment</CardTitle>
                   <CardDescription>Review and assign tax codes to transactions ({filteredTaxEntries.length} entries)</CardDescription>
@@ -985,7 +953,7 @@ export default function TaxCompliancePage() {
             </TabsContent>
             <TabsContent value="tax-provisions">
               {/* Tax Provisions */}
-              <Card>
+              <Card className="shadow-sm rounded-lg">
                 <CardHeader>
                   <CardTitle>Tax Provisions</CardTitle>
                   <CardDescription>Review and manage direct tax provisions ({filteredTaxProvisions.length} provisions)</CardDescription>
