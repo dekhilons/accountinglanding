@@ -134,7 +134,7 @@ export function ChatWidget({ onClose }: ChatWidgetProps) {
     const connectionId = generateUUID();
     currentConnectionIdRef.current = connectionId;
     const sessionId = generateUUID();
-    const WS_API_URL = process.env.NEXT_PUBLIC_WS_API_URL || `ws://localhost:8000`;
+    const WS_API_URL = process.env.NEXT_PUBLIC_WS_API_URL || `ws://localhost:8008`;
     const wsUrl = `${WS_API_URL}/ws/chat/${sessionId}`;
     console.log("🔌 Initializing WebSocket connection to:", wsUrl);
     console.log("process.env.NEXT_PUBLIC_WS_API_URL:", process.env.NEXT_PUBLIC_WS_API_URL);
