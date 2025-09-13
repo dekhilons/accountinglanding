@@ -50,7 +50,7 @@ export default function ProfilePage() {
   const fetchUserProfile = async () => {
     try {
       setIsLoading(true)
-      const response = await authenticatedFetch(`${process.env.NEXT_PUBLIC_AUTH_API_URL || 'http://localhost:8001'}/api/auth/me`)
+      const response = await authenticatedFetch(`${process.env.NEXT_PUBLIC_AUTH_API_URL || 'http://localhost:8007'}/api/auth/me`)
 
       if (!response.ok) {
         throw new Error('Failed to fetch user profile')
@@ -95,7 +95,7 @@ export default function ProfilePage() {
         employee_id: profileData.employee_id,
       }
 
-      const response = await authenticatedFetch(`${process.env.NEXT_PUBLIC_AUTH_API_URL || 'http://localhost:8001'}/api/auth/me`, {
+      const response = await authenticatedFetch(`${process.env.NEXT_PUBLIC_AUTH_API_URL || 'http://localhost:8007'}/api/auth/me`, {
         method: 'PUT',
         body: JSON.stringify(updateData),
       })
@@ -148,7 +148,7 @@ export default function ProfilePage() {
     try {
       setIsChangingPassword(true)
 
-      const response = await authenticatedFetch(`${process.env.NEXT_PUBLIC_AUTH_API_URL || 'http://localhost:8001'}/api/auth/me/change-password`, {
+      const response = await authenticatedFetch(`${process.env.NEXT_PUBLIC_AUTH_API_URL || 'http://localhost:8007'}/api/auth/me/change-password`, {
         method: 'POST',
         body: JSON.stringify({
           current_password: passwordData.currentPassword,

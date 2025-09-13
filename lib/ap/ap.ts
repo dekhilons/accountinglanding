@@ -113,7 +113,7 @@ export interface DeleteVendorResponse {
 
 // API Functions
 
-const BASE_URL = "http://localhost:8007"; // Assuming a local backend for now
+const BASE_URL = "http://localhost:8001"; // Assuming a local backend for now
 
 // Endpoint: /mcp/approveInvoice
 export async function approveInvoice(

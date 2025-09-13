@@ -97,7 +97,7 @@ export default function UsersPage() {
       // Only send status filter if it's not "all"
       if (statusFilter && statusFilter !== "all") params.append('status', statusFilter)
 
-      const url = `${process.env.NEXT_PUBLIC_AUTH_API_URL || 'http://localhost:8001'}/api/auth/users${params.toString() ? '?' + params.toString() : ''}`
+      const url = `${process.env.NEXT_PUBLIC_AUTH_API_URL || 'http://localhost:8007'}/api/auth/users${params.toString() ? '?' + params.toString() : ''}`
       const response = await authenticatedFetch(url)
 
       if (!response.ok) {
@@ -120,7 +120,7 @@ export default function UsersPage() {
   const handleAddUser = async () => {
     try {
       setIsSubmitting(true)
-      const response = await authenticatedFetch(`${process.env.NEXT_PUBLIC_AUTH_API_URL || 'http://localhost:8001'}/api/auth/register`, {
+      const response = await authenticatedFetch(`${process.env.NEXT_PUBLIC_AUTH_API_URL || 'http://localhost:8007'}/api/auth/register`, {
         method: 'POST',
         body: JSON.stringify(newUser),
       })
@@ -173,7 +173,7 @@ export default function UsersPage() {
         role: selectedUser.role,
       }
 
-      const response = await authenticatedFetch(`${process.env.NEXT_PUBLIC_AUTH_API_URL || 'http://localhost:8001'}/api/auth/users/${selectedUser.id}`, {
+      const response = await authenticatedFetch(`${process.env.NEXT_PUBLIC_AUTH_API_URL || 'http://localhost:8007'}/api/auth/users/${selectedUser.id}`, {
         method: 'PUT',
         body: JSON.stringify(updateData),
       })
@@ -207,7 +207,7 @@ export default function UsersPage() {
 
     try {
       setIsSubmitting(true)
-      const response = await authenticatedFetch(`${process.env.NEXT_PUBLIC_AUTH_API_URL || 'http://localhost:8001'}/api/auth/users/${selectedUser.id}`, {
+      const response = await authenticatedFetch(`${process.env.NEXT_PUBLIC_AUTH_API_URL || 'http://localhost:8007'}/api/auth/users/${selectedUser.id}`, {
         method: 'DELETE',
       })
 
@@ -253,7 +253,7 @@ export default function UsersPage() {
       setIsSubmitting(true)
       const newStatus = user.status === 'active' ? 'inactive' : 'active'
 
-      const response = await authenticatedFetch(`${process.env.NEXT_PUBLIC_AUTH_API_URL || 'http://localhost:8001'}/api/auth/users/${user.id}/status`, {
+      const response = await authenticatedFetch(`${process.env.NEXT_PUBLIC_AUTH_API_URL || 'http://localhost:8007'}/api/auth/users/${user.id}/status`, {
         method: 'PUT',
         body: JSON.stringify({ status: newStatus }),
       })

@@ -161,14 +161,17 @@ export default function AccountsPayablePage() {
         // TODO: Replace with actual tenant_id from context/auth
         const fetchedInvoices = await getInvoices("test-tenant")
         setInvoices(
-          fetchedInvoices.map((inv) => ({
-            ...inv,
-            id: inv.action_id, // Map action_id to id for existing component compatibility
-            matched: Math.random() > 0.5, // Mock matched status for now
-            exceptions: Math.random() > 0.7 ? ["Mock exception"] : [], // Mock exceptions
-            confidence: Math.floor(Math.random() * 30) + 70, // Mock confidence 70-99
-            document_path: inv.documentId, // Use the documentId from the fetched invoice as the MinIO path
-          }))
+          fetchedInvoices.map((inv) => {
+            const date = new Date().toISOString().split('T')[0]; // Use current date for the path
+            return {
+              ...inv,
+              id: inv.action_id, // Map action_id to id for existing component compatibility
+              matched: Math.random() > 0.5, // Mock matched status for now
+              exceptions: Math.random() > 0.7 ? ["Mock exception"] : [], // Mock exceptions
+              confidence: Math.floor(Math.random() * 30) + 70, // Mock confidence 70-99
+              document_path: `raw/${date}/${inv.documentId}`, // Construct full MinIO path with bucket and current date
+            };
+          })
         )
       } catch (error) {
         console.error("Failed to fetch invoices:", error)
@@ -215,7 +218,7 @@ export default function AccountsPayablePage() {
       const fetchPdf = async () => {
         try {
           // Fetch from the ingestion service's document preview endpoint
-          const url = `http://localhost:8002/document/preview?minio_path=${encodeURIComponent(selectedItem.document_path as string)}`; 
+          const url = `http://localhost:8002/document/preview?minio_path=${encodeURIComponent(selectedItem.document_path as string)}${".pdf"}`; 
           const response = await fetch(url);
           if (!response.ok) {
             throw new Error(`Failed to fetch PDF: ${response.statusText}`);

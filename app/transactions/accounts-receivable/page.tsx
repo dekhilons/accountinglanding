@@ -46,18 +46,11 @@ import { uploadFile } from "@/lib/upload"
 import {
   useCustomers,
   useInvoices,
-  useAgingReports,
-  useCollections,
   useCreditManagement,
   useSalesOrders,
   formatCurrency,
   formatDate,
-  type CollectionCase,
-  type CollectionActivity,
   type Payment,
-  type CollectionCaseCreate,
-  type CollectionActivityCreate,
-  type PaymentPlanCreate,
 } from "@/lib/ar-api"
 
 import { ARRemittance } from "./types/ar-specific-types"
@@ -74,7 +67,6 @@ import { CustomersSection } from "./components/CustomersSection"
 import { InvoicesSection } from "./components/InvoicesSection"
 import { SalesOrdersSection } from "./components/SalesOrdersSection"
 import { CreditManagementSection } from "./components/CreditManagementSection"
-import { AgingReportsSection } from "./components/AgingReportsSection"
 import { O2CWorkflowVisualizer } from "./components/O2CWorkflowVisualizer"
 
 
@@ -124,32 +116,6 @@ export default function AccountsReceivablePage() {
      handleEditMapping,
    } = usePaymentsData()
 
-   // Collections state (remaining in page.tsx for now)
-   const [collectionView, setCollectionView] = useState<"cases" | "activities" | "plans">("cases")
-   const [selectedCase, setSelectedCase] = useState<CollectionCase | null>(null)
-   const [newCollectionCase, setNewCollectionCase] = useState<CollectionCaseCreate>({
-     customer_id: "",
-     priority: "MEDIUM",
-     notes: "",
-   })
-   const [newActivity, setNewActivity] = useState<CollectionActivityCreate>({
-     activity_type: "",
-     description: "",
-     outcome: "",
-     next_action: "",
-     next_action_date: "",
-     amount_discussed: 0,
-     amount_promised: 0,
-     promise_date: "",
-   })
-   const [newPaymentPlan, setNewPaymentPlan] = useState<PaymentPlanCreate>({
-     total_amount: 0,
-     installment_amount: 0,
-     installment_frequency: "MONTHLY",
-     number_of_installments: 1,
-     start_date: new Date().toISOString().split("T")[0],
-     end_date: new Date().toISOString().split("T")[0],
-   })
 
    // API hooks
    const {
@@ -166,22 +132,6 @@ export default function AccountsReceivablePage() {
      refetch: refetchInvoices
    } = useInvoices()
  
-   const {
-     agingReport,
-     loading: agingLoading,
-     error: agingError,
-     refetch: refetchAging
-   } = useAgingReports("test-tenant")
-
-   const {
-     cases: collectionCases,
-     loading: collectionsLoading,
-     error: collectionsError,
-     refetch: refetchCollections,
-     createCase: createCollectionCase,
-     processOverdue,
-     executeDunning
-   } = useCollections("test-tenant")
 
    const {
      creditLimits,
@@ -300,10 +250,6 @@ export default function AccountsReceivablePage() {
                       Payments
                       <Badge className="ml-2 bg-blue-500">{payments.length}</Badge>
                     </TabsTrigger>
-                    <TabsTrigger value="remittances">
-                      Remittances
-                      <Badge className="ml-2 bg-green-500">{remittances.length}</Badge>
-                    </TabsTrigger>
                     <TabsTrigger value="customers">
                       Customers
                       <Badge className="ml-2 bg-green-500">{customers.length}</Badge>
@@ -311,14 +257,6 @@ export default function AccountsReceivablePage() {
                     <TabsTrigger value="invoices">
                       Invoices
                       <Badge className="ml-2 bg-yellow-500">{invoices.length}</Badge>
-                    </TabsTrigger>
-                    <TabsTrigger value="aging">
-                      Aging Reports
-                      <Badge className="ml-2 bg-purple-500">AR</Badge>
-                    </TabsTrigger>
-                    <TabsTrigger value="collections">
-                      Collections
-                      <Badge className="ml-2 bg-red-500">{collectionCases.length}</Badge>
                     </TabsTrigger>
                     <TabsTrigger value="credit">
                       Credit Management
@@ -453,14 +391,6 @@ export default function AccountsReceivablePage() {
                     />
                   </TabsContent>
 
-                  <TabsContent value="aging" className="space-y-4">
-                    {/* Aging reports section */}
-                    <AgingReportsSection
-                      agingReport={agingReport}
-                      agingLoading={agingLoading}
-                      handleExport={handleExport}
-                    />
-                  </TabsContent>
 
                   <TabsContent value="sales-orders" className="space-y-4">
                     {/* Sales orders section */}
