@@ -1,8 +1,10 @@
 "use client"
 
-import { useState } from "react"
-import { Plus, Edit, Trash2, Shield, Mail } from "lucide-react"
+import { useState, useEffect } from "react"
+import { useRouter } from "next/navigation"
+import { Plus, Edit, Trash2, Shield, Mail, Loader2 } from "lucide-react"
 import { AppShell } from "@/components/layout/app-shell"
+import { canAccessScreen, authenticatedFetch } from "@/lib/auth"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { DataTable } from "@/components/ui/data-table"
@@ -11,96 +13,226 @@ import { ModalDialog } from "@/components/ui/modal-dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Switch } from "@/components/ui/switch"
 import { useToast } from "@/hooks/use-toast"
 
-// Define types
+// Define types matching the API response
 type User = {
   id: string
-  name: string
+  tenant_id: string
   email: string
-  role: "admin" | "manager" | "user" | "viewer"
-  department: string
-  status: "active" | "inactive" | "pending"
-  lastLogin?: string
-  permissions: string[]
+  name: string
+  department?: string
+  role: string
+  status: string
+  is_active: boolean
+  last_login?: string
+  phone?: string
+  job_title?: string
+  employee_id?: string
+  avatar_url?: string
+  created_at: string
+  updated_at: string
+}
+
+type UserListResponse = {
+  users: User[]
+  total: number
+  page: number
+  page_size: number
 }
 
 export default function UsersPage() {
   const { toast } = useToast()
+  const router = useRouter()
   const [isAddModalOpen, setIsAddModalOpen] = useState(false)
   const [isEditModalOpen, setIsEditModalOpen] = useState(false)
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false)
   const [selectedUser, setSelectedUser] = useState<User | null>(null)
+  const [users, setUsers] = useState<User[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [searchTerm, setSearchTerm] = useState("")
+  const [roleFilter, setRoleFilter] = useState("all")
+  const [statusFilter, setStatusFilter] = useState("all")
   const [newUser, setNewUser] = useState({
     name: "",
     email: "",
+    password: "",
     role: "user",
     department: "",
+    phone: "",
+    job_title: "",
+    employee_id: "",
   })
 
-  // Sample users data
-  const users: User[] = [
-    {
-      id: "user-1001",
-      name: "John Doe",
-      email: "john.doe@company.com",
-      role: "admin",
-      department: "IT",
-      status: "active",
-      lastLogin: "2024-05-20T14:30:00",
-      permissions: ["full_access", "user_management", "system_config"],
-    },
-    {
-      id: "user-1002",
-      name: "Jane Smith",
-      email: "jane.smith@company.com",
-      role: "manager",
-      department: "Accounting",
-      status: "active",
-      lastLogin: "2024-05-20T10:15:00",
-      permissions: ["accounting_full", "approve_transactions", "view_reports"],
-    },
-    {
-      id: "user-1003",
-      name: "Mike Johnson",
-      email: "mike.johnson@company.com",
-      role: "user",
-      department: "Finance",
-      status: "active",
-      lastLogin: "2024-05-19T16:45:00",
-      permissions: ["view_transactions", "create_entries", "view_reports"],
-    },
-    {
-      id: "user-1004",
-      name: "Sarah Williams",
-      email: "sarah.williams@company.com",
-      role: "manager",
-      department: "Operations",
-      status: "active",
-      lastLogin: "2024-05-20T09:30:00",
-      permissions: ["operations_full", "approve_expenses", "view_reports"],
-    },
-    {
-      id: "user-1005",
-      name: "David Brown",
-      email: "david.brown@company.com",
-      role: "viewer",
-      department: "Executive",
-      status: "inactive",
-      lastLogin: "2024-05-15T11:20:00",
-      permissions: ["view_reports", "view_dashboards"],
-    },
-  ]
+  // Check permissions on component mount
+  useEffect(() => {
+    if (!canAccessScreen('/settings/users')) {
+      toast({
+        title: "Access Denied",
+        description: "You don't have permission to access this page.",
+        variant: "destructive",
+      })
+      router.push("/dashboard")
+      return
+    }
+    fetchUsers()
+  }, [toast])
 
-  // Handle add user
-  const handleAddUser = () => {
-    toast({
-      title: "User Added",
-      description: `${newUser.name} has been added to the system.`,
-    })
-    setIsAddModalOpen(false)
-    setNewUser({ name: "", email: "", role: "user", department: "" })
+  // Handle filter changes
+  useEffect(() => {
+    if (canAccessScreen('/settings/users')) {
+      fetchUsers()
+    }
+  }, [searchTerm, roleFilter, statusFilter])
+
+  // Fetch users from API
+  const fetchUsers = async () => {
+    try {
+      setIsLoading(true)
+      const params = new URLSearchParams()
+      if (searchTerm) params.append('search', searchTerm)
+      // Only send role filter if it's not "all"
+      if (roleFilter && roleFilter !== "all") params.append('role', roleFilter)
+      // Only send status filter if it's not "all"
+      if (statusFilter && statusFilter !== "all") params.append('status', statusFilter)
+
+      const url = `${process.env.NEXT_PUBLIC_AUTH_API_URL || 'http://localhost:8001'}/api/auth/users${params.toString() ? '?' + params.toString() : ''}`
+      const response = await authenticatedFetch(url)
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch users')
+      }
+      const data: UserListResponse = await response.json()
+      setUsers(data.users)
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to load users",
+        variant: "destructive",
+      })
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  // Create new user
+  const handleAddUser = async () => {
+    try {
+      setIsSubmitting(true)
+      const response = await authenticatedFetch(`${process.env.NEXT_PUBLIC_AUTH_API_URL || 'http://localhost:8001'}/api/auth/register`, {
+        method: 'POST',
+        body: JSON.stringify(newUser),
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.detail || 'Failed to create user')
+      }
+
+      toast({
+        title: "User Created",
+        description: `${newUser.name} has been added to the system.`,
+      })
+
+      setIsAddModalOpen(false)
+      setNewUser({
+        name: "",
+        email: "",
+        password: "",
+        role: "user",
+        department: "",
+        phone: "",
+        job_title: "",
+        employee_id: "",
+      })
+      fetchUsers() // Refresh the list
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to create user",
+        variant: "destructive",
+      })
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  // Update user
+  const handleSaveUser = async () => {
+    if (!selectedUser) return
+
+    try {
+      setIsSubmitting(true)
+      const updateData = {
+        name: selectedUser.name,
+        department: selectedUser.department,
+        phone: selectedUser.phone,
+        job_title: selectedUser.job_title,
+        employee_id: selectedUser.employee_id,
+        role: selectedUser.role,
+      }
+
+      const response = await authenticatedFetch(`${process.env.NEXT_PUBLIC_AUTH_API_URL || 'http://localhost:8001'}/api/auth/users/${selectedUser.id}`, {
+        method: 'PUT',
+        body: JSON.stringify(updateData),
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.detail || 'Failed to update user')
+      }
+
+      toast({
+        title: "User Updated",
+        description: `${selectedUser.name}'s information has been updated.`,
+      })
+
+      setIsEditModalOpen(false)
+      fetchUsers() // Refresh the list
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to update user",
+        variant: "destructive",
+      })
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  // Delete user
+  const handleConfirmDelete = async () => {
+    if (!selectedUser) return
+
+    try {
+      setIsSubmitting(true)
+      const response = await authenticatedFetch(`${process.env.NEXT_PUBLIC_AUTH_API_URL || 'http://localhost:8001'}/api/auth/users/${selectedUser.id}`, {
+        method: 'DELETE',
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.detail || 'Failed to delete user')
+      }
+
+      toast({
+        title: "User Deleted",
+        description: `${selectedUser.name} has been removed from the system.`,
+        variant: "destructive",
+      })
+
+      setIsDeleteModalOpen(false)
+      fetchUsers() // Refresh the list
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to delete user",
+        variant: "destructive",
+      })
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   // Handle edit user
@@ -109,31 +241,43 @@ export default function UsersPage() {
     setIsEditModalOpen(true)
   }
 
-  // Handle save user
-  const handleSaveUser = () => {
-    if (!selectedUser) return
-    toast({
-      title: "User Updated",
-      description: `${selectedUser.name}'s information has been updated.`,
-    })
-    setIsEditModalOpen(false)
-  }
-
   // Handle delete user
   const handleDeleteUser = (user: User) => {
     setSelectedUser(user)
     setIsDeleteModalOpen(true)
   }
 
-  // Handle confirm delete
-  const handleConfirmDelete = () => {
-    if (!selectedUser) return
-    toast({
-      title: "User Deleted",
-      description: `${selectedUser.name} has been removed from the system.`,
-      variant: "destructive",
-    })
-    setIsDeleteModalOpen(false)
+  // Handle toggle user status
+  const handleToggleUserStatus = async (user: User) => {
+    try {
+      setIsSubmitting(true)
+      const newStatus = user.status === 'active' ? 'inactive' : 'active'
+
+      const response = await authenticatedFetch(`${process.env.NEXT_PUBLIC_AUTH_API_URL || 'http://localhost:8001'}/api/auth/users/${user.id}/status`, {
+        method: 'PUT',
+        body: JSON.stringify({ status: newStatus }),
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.detail || 'Failed to update user status')
+      }
+
+      toast({
+        title: "User Status Updated",
+        description: `${user.name} has been ${newStatus === 'active' ? 'activated' : 'deactivated'}.`,
+      })
+
+      fetchUsers() // Refresh the list
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to update user status",
+        variant: "destructive",
+      })
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   // Role badge component
@@ -195,10 +339,10 @@ export default function UsersPage() {
       },
     },
     {
-      accessorKey: "lastLogin",
+      accessorKey: "last_login",
       header: "Last Login",
       cell: ({ row }: any) => {
-        const lastLogin = row.getValue("lastLogin")
+        const lastLogin = row.getValue("last_login")
         return lastLogin ? new Date(lastLogin).toLocaleDateString() : "Never"
       },
     },
@@ -211,6 +355,15 @@ export default function UsersPage() {
           <div className="flex space-x-2">
             <Button variant="ghost" size="sm" onClick={() => handleEditUser(user)}>
               <Edit className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => handleToggleUserStatus(user)}
+              disabled={isSubmitting}
+              className={user.status === 'active' ? 'text-red-600 hover:text-red-700' : 'text-green-600 hover:text-green-700'}
+            >
+              {user.status === 'active' ? 'Deactivate' : 'Activate'}
             </Button>
             <Button variant="ghost" size="sm" onClick={() => handleDeleteUser(user)}>
               <Trash2 className="h-4 w-4" />
@@ -237,14 +390,84 @@ export default function UsersPage() {
           </div>
         </div>
 
+        {/* Filters */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Filters</CardTitle>
+            <CardDescription>Filter users by search term, role, or status</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div>
+                <Label htmlFor="search">Search</Label>
+                <Input
+                  id="search"
+                  placeholder="Search by name or email"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                />
+              </div>
+              <div>
+                <Label htmlFor="role-filter">Role</Label>
+                <Select value={roleFilter} onValueChange={(value) => setRoleFilter(value === "all" ? "" : value)}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="All roles" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All roles</SelectItem>
+                    <SelectItem value="viewer">Viewer</SelectItem>
+                    <SelectItem value="user">User</SelectItem>
+                    <SelectItem value="manager">Manager</SelectItem>
+                    <SelectItem value="admin">Admin</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label htmlFor="status-filter">Status</Label>
+                <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value === "all" ? "" : value)}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="All statuses" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All statuses</SelectItem>
+                    <SelectItem value="active">Active</SelectItem>
+                    <SelectItem value="inactive">Inactive</SelectItem>
+                    <SelectItem value="pending">Pending</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex items-end">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setSearchTerm("")
+                    setRoleFilter("all")
+                    setStatusFilter("all")
+                  }}
+                  className="w-full"
+                >
+                  Clear Filters
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
         {/* Users Table */}
         <Card>
           <CardHeader>
-            <CardTitle>System Users</CardTitle>
+            <CardTitle>System Users ({users.length})</CardTitle>
             <CardDescription>Manage user accounts and access permissions</CardDescription>
           </CardHeader>
           <CardContent>
-            <DataTable columns={columns} data={users} searchColumn="name" />
+            {isLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="h-6 w-6 animate-spin mr-2" />
+                <span>Loading users...</span>
+              </div>
+            ) : (
+              <DataTable columns={columns} data={users} searchColumn="name" />
+            )}
           </CardContent>
         </Card>
       </div>
@@ -255,7 +478,7 @@ export default function UsersPage() {
         isOpen={isAddModalOpen}
         onClose={() => setIsAddModalOpen(false)}
         onConfirm={handleAddUser}
-        confirmText="Add User"
+        confirmText={isSubmitting ? "Creating..." : "Add User"}
         cancelText="Cancel"
         size="lg"
       >
@@ -268,6 +491,7 @@ export default function UsersPage() {
                 value={newUser.name}
                 onChange={(e) => setNewUser({ ...newUser, name: e.target.value })}
                 placeholder="Enter full name"
+                required
               />
             </div>
             <div>
@@ -278,8 +502,20 @@ export default function UsersPage() {
                 value={newUser.email}
                 onChange={(e) => setNewUser({ ...newUser, email: e.target.value })}
                 placeholder="Enter email address"
+                required
               />
             </div>
+          </div>
+          <div>
+            <Label htmlFor="password">Password</Label>
+            <Input
+              id="password"
+              type="password"
+              value={newUser.password}
+              onChange={(e) => setNewUser({ ...newUser, password: e.target.value })}
+              placeholder="Enter password"
+              required
+            />
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
@@ -298,22 +534,42 @@ export default function UsersPage() {
             </div>
             <div>
               <Label htmlFor="department">Department</Label>
-              <Select
+              <Input
+                id="department"
                 value={newUser.department}
-                onValueChange={(value) => setNewUser({ ...newUser, department: value })}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select department" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="Accounting">Accounting</SelectItem>
-                  <SelectItem value="Finance">Finance</SelectItem>
-                  <SelectItem value="Operations">Operations</SelectItem>
-                  <SelectItem value="IT">IT</SelectItem>
-                  <SelectItem value="Executive">Executive</SelectItem>
-                </SelectContent>
-              </Select>
+                onChange={(e) => setNewUser({ ...newUser, department: e.target.value })}
+                placeholder="Enter department"
+              />
             </div>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <Label htmlFor="phone">Phone</Label>
+              <Input
+                id="phone"
+                value={newUser.phone}
+                onChange={(e) => setNewUser({ ...newUser, phone: e.target.value })}
+                placeholder="Enter phone number"
+              />
+            </div>
+            <div>
+              <Label htmlFor="job_title">Job Title</Label>
+              <Input
+                id="job_title"
+                value={newUser.job_title}
+                onChange={(e) => setNewUser({ ...newUser, job_title: e.target.value })}
+                placeholder="Enter job title"
+              />
+            </div>
+          </div>
+          <div>
+            <Label htmlFor="employee_id">Employee ID</Label>
+            <Input
+              id="employee_id"
+              value={newUser.employee_id}
+              onChange={(e) => setNewUser({ ...newUser, employee_id: e.target.value })}
+              placeholder="Enter employee ID"
+            />
           </div>
         </div>
       </ModalDialog>
@@ -333,17 +589,29 @@ export default function UsersPage() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <Label htmlFor="edit-name">Full Name</Label>
-                <Input id="edit-name" defaultValue={selectedUser.name} />
+                <Input
+                  id="edit-name"
+                  value={selectedUser.name}
+                  onChange={(e) => setSelectedUser({ ...selectedUser, name: e.target.value })}
+                />
               </div>
               <div>
                 <Label htmlFor="edit-email">Email Address</Label>
-                <Input id="edit-email" type="email" defaultValue={selectedUser.email} />
+                <Input
+                  id="edit-email"
+                  type="email"
+                  value={selectedUser.email}
+                  onChange={(e) => setSelectedUser({ ...selectedUser, email: e.target.value })}
+                />
               </div>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <Label htmlFor="edit-role">Role</Label>
-                <Select defaultValue={selectedUser.role}>
+                <Select
+                  value={selectedUser.role}
+                  onValueChange={(value) => setSelectedUser({ ...selectedUser, role: value })}
+                >
                   <SelectTrigger>
                     <SelectValue placeholder="Select role" />
                   </SelectTrigger>
@@ -357,7 +625,10 @@ export default function UsersPage() {
               </div>
               <div>
                 <Label htmlFor="edit-department">Department</Label>
-                <Select defaultValue={selectedUser.department}>
+                <Select
+                  value={selectedUser.department || ""}
+                  onValueChange={(value) => setSelectedUser({ ...selectedUser, department: value })}
+                >
                   <SelectTrigger>
                     <SelectValue placeholder="Select department" />
                   </SelectTrigger>
@@ -375,17 +646,14 @@ export default function UsersPage() {
             <div className="border-t border-gray-200 pt-4">
               <h3 className="text-sm font-medium text-gray-500 mb-3">Permissions</h3>
               <div className="space-y-3">
-                {selectedUser.permissions.map((permission, index) => (
-                  <div key={index} className="flex items-center justify-between">
-                    <div className="flex items-center">
-                      <Shield className="h-4 w-4 text-gray-500 mr-2" />
-                      <span className="text-sm">
-                        {permission.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase())}
-                      </span>
-                    </div>
-                    <Switch defaultChecked />
-                  </div>
-                ))}
+                <div className="p-3 bg-gray-50 rounded-md">
+                  <p className="text-sm">
+                    <span className="font-medium">Current Role:</span> {selectedUser.role}
+                  </p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Permissions are automatically managed based on the user's role. Change the role above to modify permissions.
+                  </p>
+                </div>
               </div>
             </div>
 
@@ -393,9 +661,15 @@ export default function UsersPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <h3 className="text-sm font-medium text-gray-500">Account Status</h3>
-                  <p className="text-xs text-gray-500 mt-1">Enable or disable user access</p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Current status: <span className={`font-medium ${selectedUser.status === 'active' ? 'text-green-600' : 'text-red-600'}`}>
+                      {selectedUser.status}
+                    </span>
+                  </p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Use the "Activate/Deactivate" button in the table to change status.
+                  </p>
                 </div>
-                <Switch defaultChecked={selectedUser.status === "active"} />
               </div>
             </div>
           </div>

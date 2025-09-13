@@ -1,8 +1,10 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
+import { useRouter } from "next/navigation"
 import { Plus, Check, X, RefreshCw, ExternalLink } from "lucide-react"
 import { AppShell } from "@/components/layout/app-shell"
+import { canAccessScreen } from "@/lib/auth"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -24,10 +26,23 @@ type Integration = {
 
 export default function IntegrationsPage() {
   const { toast } = useToast()
+  const router = useRouter()
   const [isAddModalOpen, setIsAddModalOpen] = useState(false)
   const [isEditModalOpen, setIsEditModalOpen] = useState(false)
   const [isTestingConnection, setIsTestingConnection] = useState(false)
   const [selectedIntegration, setSelectedIntegration] = useState<Integration | null>(null)
+
+  // Check permissions on component mount
+  useEffect(() => {
+    if (!canAccessScreen('/settings/integrations')) {
+      toast({
+        title: "Access Denied",
+        description: "You don't have permission to access this page.",
+        variant: "destructive",
+      })
+      router.push("/dashboard")
+    }
+  }, [toast])
 
   // Sample data for integrations
   const integrations: Integration[] = [

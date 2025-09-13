@@ -39,6 +39,7 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { ChatWidget } from "@/components/chat/chat-widget"
+import { canAccessScreen } from "@/lib/auth"
 
 interface NavItem {
   title: string
@@ -61,11 +62,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     const userData = localStorage.getItem("user")
     if (userData) {
       setUser(JSON.parse(userData))
-    } else {
-      // Redirect to login if no user data
-      router.push("/auth/login")
     }
-  }, [router])
+    // Note: AuthWrapper in layout.tsx handles authentication checks
+  }, [])
 
   // Close mobile menu on route change
   useEffect(() => {
@@ -92,7 +91,29 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     router.push("/")
   }
 
-  const navItems: NavItem[] = [
+  // Filter navigation items based on user permissions
+  const filterNavItems = (items: NavItem[]): NavItem[] => {
+    return items
+      .map(item => {
+        if (item.children) {
+          const filteredChildren = item.children.filter(child =>
+            canAccessScreen(child.href)
+          )
+          // Only include parent if it has children or if it's a direct link with permission
+          if (filteredChildren.length > 0) {
+            return { ...item, children: filteredChildren }
+          }
+          // If no children have permission, don't include parent unless it's a direct link
+          return item.href !== "#" && canAccessScreen(item.href) ? { ...item, children: undefined } : null
+        } else {
+          // Direct link - check permission
+          return canAccessScreen(item.href) ? item : null
+        }
+      })
+      .filter((item): item is NavItem => item !== null)
+  }
+
+  const baseNavItems: NavItem[] = [
     {
       title: "Home",
       href: "/dashboard",
@@ -226,6 +247,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       ],
     },
   ]
+
+  // Apply permission filtering to navigation items
+  const navItems = filterNavItems(baseNavItems)
 
   // Get current page title from path
   const getPageTitle = () => {

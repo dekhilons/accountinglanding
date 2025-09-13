@@ -46,7 +46,7 @@ export interface RegisterRequest {
 /**
  * Auth service base URL
  */
-const AUTH_BASE_URL = 'http://localhost/api/auth'
+const AUTH_BASE_URL = `${process.env.NEXT_PUBLIC_AUTH_API_URL || 'http://localhost:8007'}/api/auth`
 
 /**
  * Check if user is authenticated
@@ -259,6 +259,56 @@ export const hasRole = (requiredRole: string): boolean => {
 }
 
 /**
+ * Permissions configuration mapping roles to accessible screens/features
+ */
+export const PERMISSIONS_CONFIG = {
+  admin: [
+    'dashboard',
+    'compliance.audit',
+    'compliance.risk',
+    'compliance.tax',
+    'liquidity.cash-management',
+    'liquidity.treasury-operations',
+    'planning.forecasting',
+    'planning.variance-analysis',
+    'record-to-report.general-ledger',
+    'record-to-report.month-end-close',
+    'settings.users',
+    'settings.integrations',
+    'settings.logs',
+    'transactions.accounts-payable',
+    'transactions.accounts-receivable',
+    'transactions.bank-reconciliation',
+    'transactions.customers.list',
+    'transactions.customers.create',
+    'transactions.customers.view',
+    'transactions.invoices',
+    'transactions.invoices.edit',
+    'transactions.manual-upload',
+    'transactions.vendors.view',
+    'profile'
+  ],
+  manager: [
+    'dashboard',
+    'liquidity.cash-management',
+    'liquidity.treasury-operations',
+    'record-to-report.general-ledger',
+    'record-to-report.month-end-close',
+    'transactions.accounts-payable',
+    'transactions.accounts-receivable',
+    'transactions.bank-reconciliation',
+    'transactions.customers.list',
+    'transactions.customers.create',
+    'transactions.customers.view',
+    'transactions.invoices',
+    'transactions.invoices.edit',
+    'transactions.manual-upload',
+    'transactions.vendors.view',
+    'profile'
+  ]
+}
+
+/**
  * Check if user has specific permission
  */
 export const hasPermission = (permission: string): boolean => {
@@ -268,6 +318,18 @@ export const hasPermission = (permission: string): boolean => {
   // Admin has all permissions
   if (user.role === 'admin') return true
 
-  // Check specific permissions (if implemented)
-  return false // Placeholder for future permission system
+  // Check if user's role has the required permission
+  const rolePermissions = PERMISSIONS_CONFIG[user.role as keyof typeof PERMISSIONS_CONFIG]
+  if (!rolePermissions) return false
+
+  return rolePermissions.includes(permission)
+}
+
+/**
+ * Check if user can access a specific screen/path
+ */
+export const canAccessScreen = (screenPath: string): boolean => {
+  // Convert screen path to permission format (e.g., '/settings/users' -> 'settings.users')
+  const permission = screenPath.replace(/^\//, '').replace(/\//g, '.')
+  return hasPermission(permission)
 }
