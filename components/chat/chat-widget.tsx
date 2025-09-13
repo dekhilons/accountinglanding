@@ -2,7 +2,7 @@
 
 import type React from "react"
 import { useState, useRef, useEffect, useCallback } from "react"
-import { X, Send, Mic, MicOff, Loader2, Volume2, VolumeX } from "lucide-react"
+import { X, Send, Mic, MicOff, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -62,6 +62,8 @@ export function ChatWidget({ onClose }: ChatWidgetProps) {
   const [isVoiceMode, setIsVoiceMode] = useState(false)
   const [voiceStatus, setVoiceStatus] = useState<"idle" | "listening" | "processing" | "speaking">("idle")
   const [reconnectAttempts, setReconnectAttempts] = useState(0)
+  const [audioLevels, setAudioLevels] = useState<number[]>(new Array(20).fill(0))
+  const [isProcessingAudio, setIsProcessingAudio] = useState(false)
 
   // Refs
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -70,6 +72,8 @@ export function ChatWidget({ onClose }: ChatWidgetProps) {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef = useRef<Blob[]>([])
   const audioContextRef = useRef<AudioContext | null>(null)
+  const analyserRef = useRef<AnalyserNode | null>(null)
+  const animationFrameRef = useRef<number | null>(null)
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const isMountedRef = useRef(true);
   const currentConnectionIdRef = useRef<string | null>(null);
@@ -245,11 +249,16 @@ export function ChatWidget({ onClose }: ChatWidgetProps) {
       // Nullify websocketRef.current here to ensure clean state on re-mount
       websocketRef.current = null;
 
-      // Close audio context
+      // Close audio context and stop visualization
       if (audioContextRef.current) {
         console.log("Closing audio context during cleanup.");
         audioContextRef.current.close();
         audioContextRef.current = null;
+      }
+      analyserRef.current = null;
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+        animationFrameRef.current = null;
       }
     };
   }, [initializeWebSocket]); // Dependency on initializeWebSocket
@@ -284,7 +293,7 @@ export function ChatWidget({ onClose }: ChatWidgetProps) {
   const sendViaRestAPI = useCallback(async (content: string) => {
     if (!isMountedRef.current) { console.log("⚠️ sendViaRestAPI called but component unmounted, ignoring"); return; }
     try {
-      const REST_API_URL = process.env.NEXT_PUBLIC_REST_API_URL || "http://localhost:8000";
+      const REST_API_URL = process.env.NEXT_PUBLIC_REST_API_URL || "http://localhost:8008";
       const response = await fetch(REST_API_URL, {
         method: "POST",
         headers: {
@@ -342,12 +351,23 @@ export function ChatWidget({ onClose }: ChatWidgetProps) {
       case "voice_transcript":
         const transcriptMessage: Message = {
           id: Date.now().toString(),
-          content: `🎤 ${data.data?.transcript || "Voice input received"}`,
+          content: data.data?.transcript || "Voice input received",
           sender: "user",
           timestamp: new Date(data.data?.timestamp || Date.now()),
           type: "voice_transcript"
         }
         setMessages(prev => [...prev, transcriptMessage])
+
+        // Stop voice mode after receiving transcript
+        setIsVoiceMode(false)
+        setVoiceStatus("idle")
+
+        // Send stop_voice to backend to clean up
+        if (websocketRef.current && websocketRef.current.readyState === WebSocket.OPEN) {
+          websocketRef.current.send(JSON.stringify({
+            type: "stop_voice"
+          }))
+        }
         break
 
       case "voice_status":
@@ -356,11 +376,8 @@ export function ChatWidget({ onClose }: ChatWidgetProps) {
         const validStatus: "idle" | "listening" | "processing" | "speaking" =
           ["idle", "listening", "processing", "speaking"].includes(status) ? status as any : "idle"
         setVoiceStatus(validStatus)
-        if (validStatus === "listening") {
-          setIsRecording(true)
-        } else if (validStatus === "idle") {
-          setIsRecording(false)
-        }
+        // Don't automatically control recording from server status
+        // Recording is now controlled manually by the mic button
         break
 
       case "error":
@@ -456,7 +473,7 @@ export function ChatWidget({ onClose }: ChatWidgetProps) {
     if (connectionStatus !== "connected") return
 
     if (!isVoiceMode) {
-      // Start voice mode
+      // Start voice mode and recording
       setIsVoiceMode(true)
       setVoiceStatus("idle")
 
@@ -465,16 +482,14 @@ export function ChatWidget({ onClose }: ChatWidgetProps) {
           type: "start_voice"
         }))
       }
+      // Start recording immediately
+      startRecording()
     } else {
-      // Stop voice mode
-      setIsVoiceMode(false)
-      setVoiceStatus("idle")
+      // Stop recording (audio will be processed and sent in onstop callback)
+      stopRecording()
 
-      if (websocketRef.current && websocketRef.current.readyState === WebSocket.OPEN) {
-        websocketRef.current.send(JSON.stringify({
-          type: "stop_voice"
-        }))
-      }
+      // Don't stop voice mode immediately - wait for audio processing
+      // Voice mode will be stopped when transcript is received
     }
   }, [isVoiceMode, connectionStatus])
 
@@ -489,6 +504,18 @@ export function ChatWidget({ onClose }: ChatWidgetProps) {
           noiseSuppression: true
         }
       })
+
+      // Set up audio context and analyser for visualization
+      const audioContext = new AudioContext()
+      const analyser = audioContext.createAnalyser()
+      const source = audioContext.createMediaStreamSource(stream)
+
+      analyser.fftSize = 256
+      analyser.smoothingTimeConstant = 0.8
+      source.connect(analyser)
+
+      audioContextRef.current = audioContext
+      analyserRef.current = analyser
 
       const mediaRecorder = new MediaRecorder(stream, {
         mimeType: 'audio/webm;codecs=opus'
@@ -506,6 +533,11 @@ export function ChatWidget({ onClose }: ChatWidgetProps) {
         const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm;codecs=opus' });
         audioChunksRef.current = []; // Clear chunks after stopping
 
+        // Stop visualization
+        stopAudioVisualization()
+
+        setIsProcessingAudio(true)
+
         if (websocketRef.current && websocketRef.current.readyState === WebSocket.OPEN) {
           try {
             // Send the audio blob as a binary message over WebSocket
@@ -519,12 +551,17 @@ export function ChatWidget({ onClose }: ChatWidgetProps) {
           console.warn("⚠️ WebSocket not open, cannot send audio data.");
           // Handle case where WebSocket is not open
         }
+
         setIsRecording(false);
+        setIsProcessingAudio(false);
       };
 
       mediaRecorder.start(100) // Collect data every 100ms
       mediaRecorderRef.current = mediaRecorder
       setIsRecording(true)
+
+      // Start audio visualization
+      updateAudioLevels()
 
     } catch (error) {
       console.error("Error starting recording:", error)
@@ -538,6 +575,15 @@ export function ChatWidget({ onClose }: ChatWidgetProps) {
       mediaRecorderRef.current.stop()
       mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop())
     }
+
+    // Stop audio context and visualization
+    if (audioContextRef.current) {
+      audioContextRef.current.close()
+      audioContextRef.current = null
+    }
+    analyserRef.current = null
+    stopAudioVisualization()
+
     setIsRecording(false)
   }, [])
 
@@ -549,6 +595,43 @@ export function ChatWidget({ onClose }: ChatWidgetProps) {
       startRecording()
     }
   }, [isRecording, startRecording, stopRecording])
+
+  const updateAudioLevels = useCallback(() => {
+    if (!analyserRef.current || !isRecording) return
+
+    const analyser = analyserRef.current
+    const bufferLength = analyser.frequencyBinCount
+    const dataArray = new Uint8Array(bufferLength)
+
+    analyser.getByteFrequencyData(dataArray)
+
+    // Calculate average levels for visualization bars
+    const levels: number[] = []
+    const barCount = 20
+    const binSize = Math.floor(bufferLength / barCount)
+
+    for (let i = 0; i < barCount; i++) {
+      let sum = 0
+      for (let j = 0; j < binSize; j++) {
+        sum += dataArray[i * binSize + j]
+      }
+      levels.push(sum / binSize / 255) // Normalize to 0-1
+    }
+
+    setAudioLevels(levels)
+
+    if (isRecording) {
+      animationFrameRef.current = requestAnimationFrame(updateAudioLevels)
+    }
+  }, [isRecording])
+
+  const stopAudioVisualization = useCallback(() => {
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current)
+      animationFrameRef.current = null
+    }
+    setAudioLevels(new Array(20).fill(0))
+  }, [])
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (!isMountedRef.current) { console.log("⚠️ handleKeyDown called but component unmounted, ignoring"); return; }
@@ -679,40 +762,76 @@ export function ChatWidget({ onClose }: ChatWidgetProps) {
       {/* Input Area */}
       <div className="p-4 border-t border-gray-200">
         <div className="flex gap-2">
-          <Input
-            ref={inputRef}
-            value={inputValue}
-            onChange={(e) => setInputValue(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Type your message..."
-            disabled={connectionStatus !== "connected"}
-            className="flex-1"
-          />
+          {isRecording || isProcessingAudio ? (
+            // Audio Frequency Visualizer
+            <div className="flex-1 flex items-center justify-center gap-1 h-10 bg-gray-50 rounded-md border">
+              {isProcessingAudio ? (
+                // Processing state - show static bars
+                <>
+                  {audioLevels.map((level, index) => (
+                    <div
+                      key={index}
+                      className="bg-orange-500 rounded-sm"
+                      style={{
+                        width: '4px',
+                        height: '16px',
+                        opacity: 0.6
+                      }}
+                    />
+                  ))}
+                  <div className="ml-2 text-xs text-orange-600">Processing...</div>
+                </>
+              ) : (
+                // Recording state - show animated bars
+                <>
+                  {audioLevels.map((level, index) => (
+                    <div
+                      key={index}
+                      className="bg-blue-500 rounded-sm transition-all duration-75"
+                      style={{
+                        width: '4px',
+                        height: `${Math.max(4, level * 32)}px`,
+                        opacity: level > 0.1 ? 1 : 0.3
+                      }}
+                    />
+                  ))}
+                  <div className="ml-2 text-xs text-gray-500">Listening...</div>
+                </>
+              )}
+            </div>
+          ) : (
+            // Text Input
+            <Input
+              ref={inputRef}
+              value={inputValue}
+              onChange={(e) => setInputValue(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="Type your message..."
+              disabled={connectionStatus !== "connected"}
+              className="flex-1"
+            />
+          )}
           <Button
             onClick={() => handleSendMessage()}
-            disabled={isLoading || connectionStatus !== "connected" || !inputValue.trim()}
+            disabled={isLoading || connectionStatus !== "connected" || !inputValue.trim() || isRecording}
             size="sm"
           >
             {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
           </Button>
           <Button
             onClick={toggleVoiceMode}
-            disabled={connectionStatus !== "connected"}
-            variant={isVoiceMode ? "default" : "outline"}
+            disabled={connectionStatus !== "connected" || isProcessingAudio}
+            variant={isProcessingAudio ? "secondary" : isRecording ? "destructive" : "outline"}
             size="sm"
           >
-            {isVoiceMode ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+            {isProcessingAudio ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : isRecording ? (
+              <MicOff className="h-4 w-4" />
+            ) : (
+              <Mic className="h-4 w-4" />
+            )}
           </Button>
-          {isVoiceMode && (
-            <Button
-              onClick={toggleRecording}
-              disabled={connectionStatus !== "connected"}
-              variant={isRecording ? "destructive" : "outline"}
-              size="sm"
-            >
-              {isRecording ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
-            </Button>
-          )}
         </div>
       </div>
     </div>
