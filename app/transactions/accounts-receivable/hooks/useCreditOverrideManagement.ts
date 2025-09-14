@@ -6,7 +6,7 @@ import {
   type CreditDecisionRequest
 } from "@/lib/ar-api"
 
-export const useCreditOverrideManagement = () => {
+export const useCreditOverrideManagement = (onDataRefresh?: () => void) => {
   const { toast } = useToast()
   const [isProcessingOverride, setIsProcessingOverride] = useState(false)
   const [selectedOrderForOverride, setSelectedOrderForOverride] = useState<SalesOrder | null>(null)
@@ -40,6 +40,11 @@ export const useCreditOverrideManagement = () => {
           title: "Credit Decision Overridden",
           description: `Order credit decision updated to ${overrideData.decision}`,
         })
+
+        // Trigger data refresh in parent component
+        if (onDataRefresh) {
+          onDataRefresh()
+        }
 
         // Close dialog
         setIsOverrideDialogOpen(false)

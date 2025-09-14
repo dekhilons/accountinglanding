@@ -73,15 +73,21 @@ export const CreditOverrideDialog: React.FC<CreditOverrideDialogProps> = ({
         notes: `${overrideData.override_reason}: ${overrideData.notes || ''}`.trim(),
       }
 
-      await onCreditOverride(creditDecisionData)
+      const response = await onCreditOverride(creditDecisionData)
+
+      // Log the response for debugging
+      console.log('Credit decision response:', response)
 
       toast({
-        title: "Credit Decision Overridden",
+        title: "Credit Decision Updated",
         description: `Order ${salesOrder.order_number} credit decision updated to ${overrideData.decision}`,
       })
 
+      // Close dialog - parent component will handle data refresh
       onOpenChange(false)
+
     } catch (error: any) {
+      console.error('Credit override error:', error)
       toast({
         title: "Override Failed",
         description: error.message || "Failed to override credit decision",

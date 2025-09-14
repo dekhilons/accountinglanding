@@ -402,6 +402,11 @@ export default function AccountsReceivablePage() {
                       creditLoading={creditLoading}
                       customers={customers}
                       salesOrders={salesOrders}
+                      onDataRefresh={() => {
+                        refetchSalesOrders()
+                        refetchCreditLimits()
+                        refetchCreditAssessments()
+                      }}
                     />
                   </TabsContent>
 

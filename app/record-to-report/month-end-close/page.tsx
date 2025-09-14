@@ -496,20 +496,6 @@ export default function MonthEndClosePage() {
       apiEndpoint: "/api/gl/transactions/unreconciled",
     },
     {
-      id: "step-4",
-      name: "Expense Accruals",
-      status: "pending", // Force to pending for testing
-      description: "Record accruals for expenses incurred but not yet invoiced",
-      apiEndpoint: "/journal-entries",
-    },
-    {
-      id: "step-5",
-      name: "Revenue Recognition",
-      status: "pending", // Force to pending for testing
-      description: "Ensure all revenue is properly recognized for the period",
-      apiEndpoint: "/journal-entries",
-    },
-    {
       id: "step-6",
       name: "Inventory Reconciliation",
       status: "pending",
@@ -549,12 +535,6 @@ export default function MonthEndClosePage() {
           break
         case "step-3":
           await executeAPReview()
-          break
-        case "step-4":
-          await executeExpenseAccruals()
-          break
-        case "step-5":
-          await executeRevenueRecognition()
           break
         case "step-7":
           await executeFinancialReporting()
@@ -666,136 +646,6 @@ export default function MonthEndClosePage() {
     await loadUnreconciledTransactions('AP')
   }
 
-  const executeExpenseAccruals = async () => {
-    if (!currentPeriod) return
-
-    // Find appropriate GL accounts for accruals
-    let accruedExpensesAccount = glAccounts.find(acc => acc.account_number.startsWith('2') && acc.name.toLowerCase().includes('accrued'))
-    let expenseAccount = glAccounts.find(acc => acc.account_number.startsWith('5') || acc.account_number.startsWith('6'))
-
-    // Re-fetch if not found, similar to revenue recognition
-    if (!accruedExpensesAccount || !expenseAccount) {
-      console.log("Accrual accounts not found initially, re-fetching...") // DEBUG LOG
-      const updatedGLAccounts = await apiService.getGLAccounts()
-      setGLAccounts(updatedGLAccounts) // Update state
-      accruedExpensesAccount = updatedGLAccounts.find(acc => acc.account_number.startsWith('2') && acc.name.toLowerCase().includes('accrued'))
-      expenseAccount = updatedGLAccounts.find(acc => acc.account_number.startsWith('5') || acc.account_number.startsWith('6'))
-    }
-
-    if (!accruedExpensesAccount || !expenseAccount) {
-      throw new Error('Required GL accounts for expense accruals not found after re-check. Please configure accrued expenses and expense accounts.')
-    }
-
-    console.log("Accrued Expenses Account ID:", accruedExpensesAccount.id) // DEBUG LOG
-    console.log("Expense Account ID:", expenseAccount.id) // DEBUG LOG
-
-    if (!accruedExpensesAccount.id || !expenseAccount.id) {
-      throw new Error("One or both required account IDs are missing for Expense Accruals.")
-    }
-
-    // Calculate accrual amount (this would typically come from business logic)
-    const accrualAmount = 5000.00
-
-    console.log("Executing Expense Accruals. Current glAccounts:", glAccounts) // DEBUG LOG
-    console.log("Accrual entry manualJournalTypeId:", manualJournalTypeId) // DEBUG LOG
-
-    const accrualEntry = {
-      journal_type_id: manualJournalTypeId, // Use the dynamically fetched ID
-      fiscal_period_id: currentPeriod.fiscalPeriodId,
-      entry_number: `ACCRUAL-${Date.now()}`,
-      entry_date: new Date().toISOString().slice(0, 19), // Use YYYY-MM-DDTHH:MM:SS format
-      description: "Monthly expense accruals",
-      reference: "MONTH-END-ACCRUAL",
-      source: "MANUAL",
-      is_adjustment: true, // Mark as adjustment
-      lines: [
-        {
-          account_id: accruedExpensesAccount.id,
-          line_number: 1,
-          description: "Accrued expenses",
-          debit_amount: accrualAmount,
-          credit_amount: 0,
-        },
-        {
-          account_id: expenseAccount.id,
-          line_number: 2,
-          description: "Expense liability",
-          debit_amount: 0,
-          credit_amount: accrualAmount,
-        }
-      ]
-    }
-
-    const createdEntry = await apiService.createJournalEntry(accrualEntry)
-    if (!createdEntry) {
-        throw new Error("Failed to create expense accrual journal entry.");
-    }
-    await apiService.postJournalEntry(createdEntry.id)
-  }
-
-  const executeRevenueRecognition = async () => {
-    if (!currentPeriod) return
-
-    // Find appropriate GL accounts for revenue recognition
-    let deferredRevenueAccount = glAccounts.find(acc => acc.account_number.startsWith('2') && acc.name.toLowerCase().includes('deferred'))
-    let revenueAccount = glAccounts.find(acc => acc.account_number.startsWith('4') && acc.name.toLowerCase().includes('revenue'))
-
-    // If accounts are not found, it's possible glAccounts state is not fully updated.
-    // Re-fetch and try again.
-    if (!deferredRevenueAccount || !revenueAccount) {
-      const updatedGLAccounts = await apiService.getGLAccounts()
-      setGLAccounts(updatedGLAccounts) // Update state
-      deferredRevenueAccount = updatedGLAccounts.find(acc => acc.account_number.startsWith('2') && acc.name.toLowerCase().includes('deferred'))
-      revenueAccount = updatedGLAccounts.find(acc => acc.account_number.startsWith('4') && acc.name.toLowerCase().includes('revenue'))
-    }
-
-    if (!deferredRevenueAccount || !revenueAccount) {
-      throw new Error('Required GL accounts for revenue recognition not found after re-check. Please configure deferred revenue and revenue accounts.')
-    }
-
-    // Calculate recognition amount (this would typically come from business logic)
-    const recognitionAmount = 7500.00
-
-    console.log("Executing Revenue Recognition. Current glAccounts:", glAccounts) // DEBUG LOG
-    console.log("Revenue entry manualJournalTypeId:", manualJournalTypeId) // DEBUG LOG
-
-    if (!deferredRevenueAccount.id || !revenueAccount.id) {
-      throw new Error("One or both required account IDs are missing for Revenue Recognition.")
-    }
-
-    const revenueEntry = {
-      journal_type_id: manualJournalTypeId, // Use the dynamically fetched ID
-      fiscal_period_id: currentPeriod.fiscalPeriodId,
-      entry_number: `REVENUE-${Date.now()}`,
-      entry_date: new Date().toISOString(), // Use full ISO string for datetime field
-      description: "Revenue recognition adjustments",
-      reference: "MONTH-END-REVENUE",
-      source: "MANUAL",
-      is_adjustment: true, // Mark as adjustment
-      lines: [
-        {
-          account_id: deferredRevenueAccount.id,
-          line_number: 1,
-          description: "Deferred revenue recognition",
-          debit_amount: 0,
-          credit_amount: recognitionAmount,
-        },
-        {
-          account_id: revenueAccount.id,
-          line_number: 2,
-          description: "Recognized revenue",
-          debit_amount: recognitionAmount,
-          credit_amount: 0,
-        }
-      ]
-    }
-
-    const createdEntry = await apiService.createJournalEntry(revenueEntry)
-    if (!createdEntry) {
-        throw new Error("Failed to create revenue recognition journal entry.");
-    }
-    await apiService.postJournalEntry(createdEntry.id)
-  }
 
   const executeFinancialReporting = async () => {
     if (!currentPeriod || !currentPeriod.fiscalPeriodId) {

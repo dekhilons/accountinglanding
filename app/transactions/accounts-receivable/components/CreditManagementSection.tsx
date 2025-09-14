@@ -21,6 +21,7 @@ interface CreditManagementSectionProps {
   creditLoading: boolean;
   customers: Customer[];
   salesOrders: SalesOrder[];
+  onDataRefresh?: () => void;
 }
 
 export const CreditManagementSection: React.FC<CreditManagementSectionProps> = ({
@@ -29,6 +30,7 @@ export const CreditManagementSection: React.FC<CreditManagementSectionProps> = (
   creditLoading,
   customers,
   salesOrders,
+  onDataRefresh,
 }) => {
   const { creditView, setCreditView } = useCreditManagementLogic()
 
@@ -40,7 +42,7 @@ export const CreditManagementSection: React.FC<CreditManagementSectionProps> = (
     openOverrideDialog,
     closeOverrideDialog,
     canOverrideCreditDecision,
-  } = useCreditOverrideManagement()
+  } = useCreditOverrideManagement(onDataRefresh)
 
   return (
     <div className="space-y-4">
