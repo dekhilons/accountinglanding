@@ -79,7 +79,7 @@ export default function ManualUploadPage() {
   const handleUpload = async (file: File, documentType: string) => {
     // Simulate API call
     return new Promise<void>((resolve) => {
-      setTimeout(() => {
+      setTimeout(async () => {
         const newUpload: UploadedFile = {
           id: `upload-${Date.now()}`,
           fileName: file.name,
@@ -96,9 +96,60 @@ export default function ManualUploadPage() {
           title: "Upload Started",
           description: `${file.name} is being processed.`,
         })
+
+        // Trigger AR workflow if AR document is uploaded
+        if (documentType === "AR_RECEIPTS") {
+          await triggerARWorkflow(file, newUpload.id)
+        }
+
         resolve()
       }, 1000)
     })
+  }
+
+  // Trigger Accounts Receivable workflow
+  const triggerARWorkflow = async (file: File, uploadId: string) => {
+    try {
+      // Simulate processing the AR document and generating invoice
+      setTimeout(() => {
+        // Generate a new invoice for approval
+        const newInvoice = {
+          id: `inv-${Date.now()}`,
+          title: `Invoice #${Math.floor(Math.random() * 10000)} - ${file.name.split('.')[0]}`,
+          description: `$${(Math.random() * 5000 + 500).toFixed(2)} - Generated from ${file.name}`,
+          confidence: Math.floor(Math.random() * 20) + 80, // 80-99% confidence
+          rationale: `Invoice automatically generated from uploaded AR document. Document processed and validated against customer records.`,
+          type: "invoice",
+        }
+
+        // Add to dashboard approval queue (this would normally be done via API/state management)
+        addInvoiceToApprovalQueue(newInvoice)
+
+        toast({
+          title: "AR Workflow Triggered",
+          description: `Invoice generated and added to approval queue from ${file.name}`,
+        })
+      }, 2000)
+    } catch (error) {
+      console.error("AR workflow failed:", error)
+      toast({
+        title: "AR Workflow Failed",
+        description: "Failed to process AR document and generate invoice.",
+        variant: "destructive",
+      })
+    }
+  }
+
+  // Function to add invoice to dashboard approval queue
+  const addInvoiceToApprovalQueue = (invoice: any) => {
+    // This would normally use a global state management solution or API call
+    // For now, we'll use localStorage to communicate with the dashboard
+    const existingQueue = JSON.parse(localStorage.getItem('approvalQueue') || '[]')
+    const updatedQueue = [...existingQueue, invoice]
+    localStorage.setItem('approvalQueue', JSON.stringify(updatedQueue))
+
+    // Dispatch custom event to notify dashboard of new invoice
+    window.dispatchEvent(new CustomEvent('invoiceAdded', { detail: invoice }))
   }
 
   // Status badge component

@@ -61,7 +61,31 @@ export const usePaymentsData = () => {
   const filteredPayments = payments.filter((payment) => {
     const matchesCustomer = paymentCustomer === "all" || payment.customer_id === paymentCustomer
     const matchesStatus = paymentStatus === "all" || payment.status === paymentStatus
-    return matchesCustomer && matchesStatus
+
+    // Date range filtering
+    let matchesDateRange = true
+    if (paymentDateRange !== "all") {
+      const paymentDate = new Date(payment.payment_date)
+      const now = new Date()
+
+      switch (paymentDateRange) {
+        case "today":
+          matchesDateRange = paymentDate.toDateString() === now.toDateString()
+          break
+        case "week":
+          const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
+          matchesDateRange = paymentDate >= weekAgo
+          break
+        case "month":
+          const monthAgo = new Date(now.getFullYear(), now.getMonth() - 1, now.getDate())
+          matchesDateRange = paymentDate >= monthAgo
+          break
+        default:
+          matchesDateRange = true
+      }
+    }
+
+    return matchesCustomer && matchesStatus && matchesDateRange
   })
 
   const filteredRemittances = remittances.filter((remittance) => {

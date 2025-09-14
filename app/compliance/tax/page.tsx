@@ -53,6 +53,10 @@ export default function TaxCompliancePage() {
   const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false)
   const [selectedEntry, setSelectedEntry] = useState<TaxEntry | null>(null)
   const [selectedTaxCode, setSelectedTaxCode] = useState<string>("")
+  const [selectedVendor, setSelectedVendor] = useState<string>("")
+  const [selectedAccountCode, setSelectedAccountCode] = useState<string>("")
+  const [selectedRegion, setSelectedRegion] = useState<string>("")
+  const [isEditingTaxCode, setIsEditingTaxCode] = useState(false)
   const [selectedEntryIds, setSelectedEntryIds] = useState<Record<string, boolean>>({});
 
   const [isProvisionDetailsModalOpen, setIsProvisionDetailsModalOpen] = useState(false)
@@ -140,7 +144,7 @@ export default function TaxCompliancePage() {
     }));
   }, [taxEntries, taxCodes]);
 
-  const BAR_COLORS = ['#34A853', '#4285F4', '#FBBC05', '#EA4335', '#9C27B0', '#00BCD4']; // Green and Blue first, then other Google-like material design colors
+  const BAR_COLORS = ['#3b82f6', '#22c55e', '#3b82f6', '#22c55e', '#3b82f6', '#22c55e']; // Blue and Green from platform chart colors
 
   // Exception Monitoring Data
   const exceptionMonitoringData = useMemo(() => {
@@ -196,6 +200,10 @@ export default function TaxCompliancePage() {
     if (entry) {
       setSelectedEntry(entry)
       setSelectedTaxCode(entry.tax_code)
+      setSelectedVendor(entry.vendor_customer_id || "")
+      setSelectedAccountCode(entry.account_code)
+      setSelectedRegion(entry.region)
+      setIsEditingTaxCode(false)
       setIsDetailsModalOpen(true)
     }
   }
@@ -384,10 +392,10 @@ export default function TaxCompliancePage() {
 
   // Handle approve tax code for Tax Entry
   const handleApproveTaxCode = async () => {
-    if (!selectedEntry || !selectedTaxCode) {
+    if (!selectedEntry) {
       toast({
         title: "Validation Error",
-        description: "Please select a tax code before approving.",
+        description: "No tax entry selected for approval.",
         variant: "destructive",
       })
       return
@@ -412,13 +420,21 @@ export default function TaxCompliancePage() {
     }
 
     try {
-      await update(selectedEntry.entry_id, {
+      const updateData: any = {
         status: "APPLIED",
         tax_code: selectedTaxCode,
-      });
+      };
+
+      if (isEditingTaxCode) {
+        updateData.vendor_customer_id = selectedVendor;
+        updateData.account_code = selectedAccountCode;
+        updateData.region = selectedRegion;
+      }
+
+      await update(selectedEntry.entry_id, updateData);
       toast({
-        title: "Tax Code Approved",
-        description: `Tax code ${selectedTaxCode} has been assigned to transaction ${selectedEntry.txn_id}.`,
+        title: "Tax Entry Approved",
+        description: `Tax entry ${selectedEntry.txn_id} has been approved${isEditingTaxCode ? ' with modifications' : ''}.`,
       })
       setIsDetailsModalOpen(false)
       setSelectedEntry(null)
@@ -463,7 +479,7 @@ export default function TaxCompliancePage() {
     try {
       await updateEntryStatus(selectedEntry.entry_id, "REJECTED")
       toast({
-        title: "Tax Code Rejected",
+        title: "Tax Entry Rejected",
         description: `Tax entry ${selectedEntry.txn_id} has been rejected.`,
       })
       setIsDetailsModalOpen(false)
@@ -975,17 +991,27 @@ export default function TaxCompliancePage() {
 
       {/* Transaction Details Modal (Tax Entry) */}
       <ModalDialog
-        title="Assign Tax Code"
+        title={isEditingTaxCode ? "Modify Tax Entry" : "Review Tax Entry"}
         isOpen={isDetailsModalOpen}
         onClose={() => setIsDetailsModalOpen(false)}
-        confirmText="Approve Tax Code"
+        confirmText={isEditingTaxCode ? "Save Changes" : "Approve Entry"}
         onConfirm={handleApproveTaxCode}
-        cancelText="Reject Tax Code"
+        cancelText="Reject Entry"
         onCancel={handleRejectTaxCode} // Added reject handler
         size="lg"
       >
         {selectedEntry && (
           <div className="space-y-6">
+            {!isEditingTaxCode && (
+              <div className="flex justify-end">
+                <Button
+                  variant="outline"
+                  onClick={() => setIsEditingTaxCode(true)}
+                >
+                  Modify Entry
+                </Button>
+              </div>
+            )}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <h3 className="text-sm font-medium text-gray-500">Date</h3>
@@ -1001,11 +1027,29 @@ export default function TaxCompliancePage() {
               </div>
               <div>
                 <h3 className="text-sm font-medium text-gray-500">Vendor/Customer</h3>
-                <p className="mt-1">{selectedEntry.vendor_customer_id || "N/A"}</p>
+                {isEditingTaxCode ? (
+                  <Input
+                    value={selectedVendor}
+                    onChange={(e) => setSelectedVendor(e.target.value)}
+                    className="mt-1"
+                    placeholder="Enter vendor/customer"
+                  />
+                ) : (
+                  <p className="mt-1">{selectedEntry.vendor_customer_id || "N/A"}</p>
+                )}
               </div>
               <div>
                 <h3 className="text-sm font-medium text-gray-500">Account Code</h3>
-                <p className="mt-1">{selectedEntry.account_code}</p>
+                {isEditingTaxCode ? (
+                  <Input
+                    value={selectedAccountCode}
+                    onChange={(e) => setSelectedAccountCode(e.target.value)}
+                    className="mt-1"
+                    placeholder="Enter account code"
+                  />
+                ) : (
+                  <p className="mt-1">{selectedEntry.account_code}</p>
+                )}
               </div>
               <div>
                 <h3 className="text-sm font-medium text-gray-500">Current Tax Code</h3>
@@ -1033,9 +1077,45 @@ export default function TaxCompliancePage() {
               </div>
               <div>
                 <h3 className="text-sm font-medium text-gray-500">Region</h3>
-                <p className="mt-1">{selectedEntry.region}</p>
+                {isEditingTaxCode ? (
+                  <Input
+                    value={selectedRegion}
+                    onChange={(e) => setSelectedRegion(e.target.value)}
+                    className="mt-1"
+                    placeholder="Enter region"
+                  />
+                ) : (
+                  <p className="mt-1">{selectedEntry.region}</p>
+                )}
               </div>
             </div>
+
+            {isEditingTaxCode && (
+              <div className="border-t border-gray-200 pt-4">
+                <h3 className="text-sm font-medium text-gray-500 mb-2">Entry Modifications</h3>
+                <p className="text-xs text-gray-400 mb-4">Modify the tax code and other entry details as needed</p>
+                <Select value={selectedTaxCode} onValueChange={setSelectedTaxCode}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select tax code" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {taxCodes.map((code) => (
+                      <SelectItem key={code.value} value={code.value}>
+                        {code.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {selectedTaxCode === "EXP-ENT" && (
+                  <div className="bg-amber-50 border border-amber-200 rounded-md p-3 mt-3">
+                    <p className="text-sm text-amber-700">
+                      <strong>Note:</strong> Entertainment expenses are only 50% deductible for tax purposes. Please
+                      ensure proper documentation is attached.
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
 
             {selectedEntry.status === "PENDING_APPROVAL" && selectedEntry.confidence < 0.85 && (
               <div className="border-t border-gray-200 pt-4">
@@ -1054,29 +1134,6 @@ export default function TaxCompliancePage() {
               </div>
             )}
 
-            <div className="border-t border-gray-200 pt-4">
-              <h3 className="text-sm font-medium text-gray-500 mb-2">Assign Tax Code</h3>
-              <Select value={selectedTaxCode} onValueChange={setSelectedTaxCode}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select tax code" />
-                </SelectTrigger>
-                <SelectContent>
-                  {taxCodes.map((code) => (
-                    <SelectItem key={code.value} value={code.value}>
-                      {code.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {selectedTaxCode === "EXP-ENT" && (
-                <div className="bg-amber-50 border border-amber-200 rounded-md p-3 mt-3">
-                  <p className="text-sm text-amber-700">
-                    <strong>Note:</strong> Entertainment expenses are only 50% deductible for tax purposes. Please
-                    ensure proper documentation is attached.
-                  </p>
-                </div>
-              )}
-            </div>
           </div>
         )}
       </ModalDialog>

@@ -76,6 +76,7 @@ export default function AccountsReceivablePage() {
    // Component state
    const [activeTab, setActiveTab] = useState("payments")
    const [isUploading, setIsUploading] = useState(false)
+   const [expandedOrders, setExpandedOrders] = useState<Set<string>>(new Set())
 
    const {
      payments,
@@ -178,7 +179,7 @@ export default function AccountsReceivablePage() {
 
     try {
       const tenantId = "test-tenant"
-      const uploadResult = await uploadFile(file, tenantId, "accounts-receivable-document")
+      const uploadResult = await uploadFile(file, tenantId, "AR_RECEIPT")
       console.log("Upload successful:", uploadResult)
 
       toast({
@@ -196,6 +197,19 @@ export default function AccountsReceivablePage() {
       setIsUploading(false)
       event.target.value = ""
     }
+  }
+
+  // Handle order expansion toggle
+  const toggleOrderExpansion = (orderId: string) => {
+    setExpandedOrders(prev => {
+      const newSet = new Set(prev)
+      if (newSet.has(orderId)) {
+        newSet.delete(orderId)
+      } else {
+        newSet.add(orderId)
+      }
+      return newSet
+    })
   }
 
   return (
@@ -410,11 +424,14 @@ export default function AccountsReceivablePage() {
                           <p className="text-muted-foreground">No sales orders available to display workflow.</p>
                         </div>
                       ) : (
-                        <div className="grid gap-6">
-                          {salesOrders.slice(0, 3).map((order) => (
+                        <div className="space-y-4">
+                          {salesOrders.slice(0, 10).map((order) => (
                             <O2CWorkflowVisualizer
                               key={order.id}
                               salesOrder={order}
+                              isExpanded={expandedOrders.has(order.id)}
+                              onToggleExpansion={() => toggleOrderExpansion(order.id)}
+                              customers={customers}
                             />
                           ))}
                         </div>

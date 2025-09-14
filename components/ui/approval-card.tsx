@@ -13,6 +13,7 @@ interface ApprovalCardProps {
   description: string
   confidence: number
   rationale: string
+  status?: 'pending' | 'approved' | 'rejected'
   onApprove: (id: string) => void
   onReject: (id: string, reason?: string) => void
   onEdit: (id: string) => void
@@ -24,6 +25,7 @@ export function ApprovalCard({
   description,
   confidence,
   rationale,
+  status = 'pending',
   onApprove,
   onReject,
   onEdit,
@@ -42,12 +44,27 @@ export function ApprovalCard({
     }
   }
 
+  // Determine status badge styling
+  const getStatusBadge = () => {
+    switch (status) {
+      case 'approved':
+        return <Badge className="bg-green-100 text-green-800">Approved</Badge>
+      case 'rejected':
+        return <Badge className="bg-red-100 text-red-800">Rejected</Badge>
+      default:
+        return null
+    }
+  }
+
   return (
     <Card className="w-full">
       <CardHeader className="pb-2">
         <div className="flex justify-between items-start">
           <CardTitle className="text-lg">{title}</CardTitle>
-          {getConfidenceBadge()}
+          <div className="flex gap-2">
+            {getConfidenceBadge()}
+            {getStatusBadge()}
+          </div>
         </div>
         <CardDescription>{description}</CardDescription>
       </CardHeader>
@@ -81,7 +98,7 @@ export function ApprovalCard({
               Cancel
             </Button>
           </>
-        ) : (
+        ) : status === 'pending' ? (
           <>
             <div className="flex space-x-2">
               <Button variant="default" className="bg-teal-600 hover:bg-teal-700" onClick={() => onApprove(id)}>
@@ -106,6 +123,10 @@ export function ApprovalCard({
               Reject
             </Button>
           </>
+        ) : (
+          <div className="text-sm text-gray-500 italic">
+            This item has been {status}.
+          </div>
         )}
       </CardFooter>
     </Card>

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import Link from "next/link"
 import { ArrowRight, AlertTriangle, FileText, BarChart3, TrendingUp, TrendingDown, Bell, BellRing } from "lucide-react"
 import { AppShell } from "@/components/layout/app-shell"
@@ -14,11 +14,13 @@ import { useToast } from "@/hooks/use-toast"
 
 export default function DashboardPage() {
   const { toast } = useToast()
-  const [pendingApprovals, setPendingApprovals] = useState(3)
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false)
   const [isApprovalsModalOpen, setIsApprovalsModalOpen] = useState(false)
   const [isReportModalOpen, setIsReportModalOpen] = useState(false)
   const [isGeneratingReport, setIsGeneratingReport] = useState(false)
+  const [approvalStatuses, setApprovalStatuses] = useState<Record<string, 'pending' | 'approved' | 'rejected'>>({})
+  const [currentInvoiceIndex, setCurrentInvoiceIndex] = useState(0)
+  const [dynamicInvoices, setDynamicInvoices] = useState<any[]>([])
 
   // Sample notifications data
   const notifications = [
@@ -56,8 +58,8 @@ export default function DashboardPage() {
     },
   ]
 
-  // Sample pending approvals data
-  const allPendingApprovals = [
+  // Sample pending approvals data queue
+  const pendingInvoicesQueue = [
     {
       id: "inv-1234",
       title: "Invoice #1234 - Office Supplies Inc.",
@@ -68,24 +70,69 @@ export default function DashboardPage() {
       type: "invoice",
     },
     {
-      id: "exp-5678",
-      title: "Expense Report #5678 - John Doe",
-      description: "$850.00 - Travel expenses",
-      confidence: 88,
+      id: "inv-5679",
+      title: "Invoice #5679 - Tech Solutions Ltd.",
+      description: "$3,450.00 - Software licenses",
+      confidence: 89,
       rationale:
-        "Travel expenses are within policy limits. All receipts are attached and destinations match approved business travel.",
-      type: "expense",
+        "Recurring software subscription matches previous payments. License terms and pricing are consistent with our agreement.",
+      type: "invoice",
     },
     {
-      id: "pur-9012",
-      title: "Purchase Order #9012 - IT Equipment",
-      description: "$4,500.00 - Laptop computers",
-      confidence: 95,
+      id: "inv-8901",
+      title: "Invoice #8901 - Marketing Agency Pro",
+      description: "$2,800.00 - Digital marketing campaign",
+      confidence: 85,
       rationale:
-        "Purchase order matches approved budget allocation for IT equipment. Vendor is on approved supplier list.",
-      type: "purchase",
+        "Marketing services align with approved campaign budget. All deliverables and milestones are clearly documented.",
+      type: "invoice",
+    },
+    {
+      id: "inv-2345",
+      title: "Invoice #2345 - Consulting Partners LLC",
+      description: "$5,200.00 - Strategic consulting",
+      confidence: 94,
+      rationale:
+        "Consulting engagement matches approved project scope. Timesheets and deliverables are properly documented.",
+      type: "invoice",
+    },
+    {
+      id: "exp-6789",
+      title: "Expense Report #6789 - Sarah Johnson",
+      description: "$720.00 - Client meeting expenses",
+      confidence: 87,
+      rationale:
+        "Business expenses are within policy limits. All receipts are attached and business purpose is clearly documented.",
+      type: "expense",
     },
   ]
+
+  // Combine static and dynamic invoices for display
+  const combinedInvoiceQueue = [...pendingInvoicesQueue, ...dynamicInvoices]
+  const allPendingApprovals = combinedInvoiceQueue
+
+  // Calculate pending count dynamically based on unprocessed invoices
+  const pendingApprovals = [...pendingInvoicesQueue, ...dynamicInvoices].filter(invoice =>
+    !approvalStatuses[invoice.id] || approvalStatuses[invoice.id] === 'pending'
+  ).length
+
+  // Listen for new invoices added from upload
+  useEffect(() => {
+    const handleInvoiceAdded = (event: CustomEvent) => {
+      const newInvoice = event.detail
+      setDynamicInvoices(prev => [...prev, newInvoice])
+      toast({
+        title: "New Invoice Added",
+        description: `${newInvoice.title} has been added to the approval queue.`,
+      })
+    }
+
+    window.addEventListener('invoiceAdded', handleInvoiceAdded as EventListener)
+
+    return () => {
+      window.removeEventListener('invoiceAdded', handleInvoiceAdded as EventListener)
+    }
+  }, [toast])
 
   // Sample data for charts
   const cashRunwayData = [
@@ -159,20 +206,32 @@ export default function DashboardPage() {
   }
 
   const handleApprove = (id: string) => {
+    setApprovalStatuses((prev) => ({ ...prev, [id]: 'approved' }))
     toast({
       title: "Approved",
       description: `Item ${id} has been approved.`,
     })
-    setPendingApprovals((prev) => prev - 1)
+    // Move to next invoice in queue
+    setCurrentInvoiceIndex((prev) => {
+      const nextIndex = prev + 1
+      // If we've processed all invoices, stay at the last one
+      return nextIndex < combinedInvoiceQueue.length ? nextIndex : prev
+    })
   }
 
   const handleReject = (id: string, reason?: string) => {
+    setApprovalStatuses((prev) => ({ ...prev, [id]: 'rejected' }))
     toast({
       title: "Rejected",
       description: reason ? `Item ${id} rejected: ${reason}` : `Item ${id} has been rejected.`,
       variant: "destructive",
     })
-    setPendingApprovals((prev) => prev - 1)
+    // Move to next invoice in queue
+    setCurrentInvoiceIndex((prev) => {
+      const nextIndex = prev + 1
+      // If we've processed all invoices, stay at the last one
+      return nextIndex < combinedInvoiceQueue.length ? nextIndex : prev
+    })
   }
 
   const handleEdit = (id: string) => {
@@ -239,16 +298,24 @@ export default function DashboardPage() {
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
-                <ApprovalCard
-                  id="inv-1234"
-                  title="Invoice #1234 - Office Supplies Inc."
-                  description="$1,250.00 - Due in 15 days"
-                  confidence={92}
-                  rationale="This invoice matches previous payments to this vendor. All line items are within expected ranges and the payment terms match our agreement."
-                  onApprove={handleApprove}
-                  onReject={handleReject}
-                  onEdit={handleEdit}
-                />
+                {currentInvoiceIndex < combinedInvoiceQueue.length ? (
+                  <ApprovalCard
+                    id={combinedInvoiceQueue[currentInvoiceIndex].id}
+                    title={combinedInvoiceQueue[currentInvoiceIndex].title}
+                    description={combinedInvoiceQueue[currentInvoiceIndex].description}
+                    confidence={combinedInvoiceQueue[currentInvoiceIndex].confidence}
+                    rationale={combinedInvoiceQueue[currentInvoiceIndex].rationale}
+                    status={approvalStatuses[combinedInvoiceQueue[currentInvoiceIndex].id] || 'pending'}
+                    onApprove={handleApprove}
+                    onReject={handleReject}
+                    onEdit={handleEdit}
+                  />
+                ) : (
+                  <div className="text-center py-8 text-gray-500">
+                    <p className="text-lg font-medium">All invoices processed!</p>
+                    <p className="text-sm">No more pending approvals at this time.</p>
+                  </div>
+                )}
               </div>
             </CardContent>
             <CardFooter>
@@ -320,7 +387,7 @@ export default function DashboardPage() {
             </CardContent>
             <CardFooter>
               <Link
-                href="/transactions/invoices?tab=ap"
+                href="/transactions/accounts-payable"
                 className="text-sm text-teal-600 hover:underline ml-auto flex items-center"
               >
                 View AP invoices
@@ -361,7 +428,7 @@ export default function DashboardPage() {
             </CardContent>
             <CardFooter>
               <Link
-                href="/transactions/invoices?tab=ar"
+                href="/transactions/accounts-receivable"
                 className="text-sm text-teal-600 hover:underline ml-auto flex items-center"
               >
                 View AR receivables
@@ -484,6 +551,7 @@ export default function DashboardPage() {
               description={approval.description}
               confidence={approval.confidence}
               rationale={approval.rationale}
+              status={approvalStatuses[approval.id] || 'pending'}
               onApprove={handleApprove}
               onReject={handleReject}
               onEdit={handleEdit}
