@@ -2,6 +2,7 @@
 
 import type React from "react"
 import { useState, useRef, useEffect, useCallback } from "react"
+import ReactMarkdown from 'react-markdown'
 import { X, Send, Mic, MicOff, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -649,7 +650,7 @@ export function ChatWidget({ onClose }: ChatWidgetProps) {
   }, [messages]);
 
   return (
-    <div className="fixed bottom-4 right-4 w-96 h-[600px] bg-white border border-gray-300 rounded-lg shadow-lg flex flex-col z-50">
+    <div className="fixed bottom-4 right-4 w-[500px] h-[600px] bg-white border border-gray-300 rounded-lg shadow-lg flex flex-col z-50">
       {/* Header */}
       <div className="flex items-center justify-between p-4 border-b border-gray-200">
         <h3 className="text-lg font-semibold">AI Accounting Assistant</h3>
@@ -732,7 +733,9 @@ export function ChatWidget({ onClose }: ChatWidgetProps) {
                     {message.timestamp.toLocaleTimeString()}
                   </span>
                 </div>
-                <p className="text-sm">{message.content}</p>
+                <div className="text-sm">
+                  <ReactMarkdown>{message.content}</ReactMarkdown>
+                </div>
               </div>
             </div>
           ))}
