@@ -278,7 +278,7 @@ export default function VarianceAnalysisPage() {
         {/* Variance Summary */}
         <Card>
           <CardHeader>
-            <CardTitle>May 2024 Variance Summary</CardTitle>
+            <CardTitle>Variance Reports Summary</CardTitle>
             <CardDescription>Top variances between budget and actual performance</CardDescription>
           </CardHeader>
           <CardContent>
