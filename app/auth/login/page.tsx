@@ -51,14 +51,26 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col justify-center py-12 sm:px-6 lg:px-8">
-      <div className="sm:mx-auto sm:w-full sm:max-w-md">
-        <div className="flex justify-center">
-          <Link href="/" className="flex items-center">
-            <Calculator className="h-10 w-10 text-teal-600" />
-            <span className="ml-2 text-2xl font-bold text-gray-900">AccountingAI</span>
-          </Link>
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-gray-100">
+      {/* Navigation */}
+      <nav className="bg-white border-b border-gray-200 shadow-sm">
+        <div className="px-4 sm:px-6 lg:px-8">
+          <div className="flex justify-between items-center h-16">
+            <Link href="/" className="flex items-center">
+              <Calculator className="h-10 w-10 text-teal-600" />
+              <span className="ml-2 text-xl font-bold text-gray-900">AccountingAI</span>
+            </Link>
+            <div className="flex items-center space-x-4">
+              <Link href="/" className="text-gray-700 hover:text-teal-600 transition-colors">
+                Home
+              </Link>
+            </div>
+          </div>
         </div>
+      </nav>
+
+      <div className="flex flex-col justify-center py-12 sm:px-6 lg:px-8">
+      <div className="sm:mx-auto sm:w-full sm:max-w-md">
         <h2 className="mt-6 text-center text-3xl font-bold tracking-tight text-gray-900">Sign in to your account</h2>
         <p className="mt-2 text-center text-sm text-gray-600">
           Or{" "}
@@ -69,7 +81,7 @@ export default function LoginPage() {
       </div>
 
       <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md">
-        <Card>
+        <Card className="shadow-lg">
           <CardHeader>
             <CardTitle>Welcome back</CardTitle>
             <CardDescription>Enter your credentials to access your account</CardDescription>
@@ -139,7 +151,7 @@ export default function LoginPage() {
                 </div>
               </div>
 
-              <Button type="submit" className="w-full bg-teal-600 hover:bg-teal-700" disabled={isLoading}>
+              <Button type="submit" className="w-full bg-gradient-to-r from-teal-500 to-cyan-600 hover:from-teal-600 hover:to-cyan-700 transition-all duration-300" disabled={isLoading}>
                 {isLoading ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -153,6 +165,7 @@ export default function LoginPage() {
 
           </CardContent>
         </Card>
+      </div>
       </div>
     </div>
   )
