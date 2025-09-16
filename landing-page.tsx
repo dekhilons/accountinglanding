@@ -26,7 +26,7 @@ export default function Component() {
     <div className="min-h-screen bg-white">
       {/* Fixed Navigation */}
       <nav className="fixed top-0 left-0 right-0 bg-white border-b border-gray-200 z-50">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
             {/* Logo */}
             <div className="flex items-center">
@@ -41,7 +41,7 @@ export default function Component() {
               <Button variant="ghost" className="text-gray-700 hover:text-gray-900" onClick={handleLogin}>
                 Login
               </Button>
-              <Button className="bg-teal-600 hover:bg-teal-700 text-white" onClick={handleGetStarted}>
+              <Button className="bg-gradient-to-r from-teal-500 to-cyan-600 hover:from-teal-600 hover:to-cyan-700 text-white transition-all duration-300" onClick={handleGetStarted}>
                 Get Started
               </Button>
             </div>
@@ -61,7 +61,7 @@ export default function Component() {
                 <Button variant="ghost" className="justify-start text-gray-700" onClick={handleLogin}>
                   Login
                 </Button>
-                <Button className="bg-teal-600 hover:bg-teal-700 text-white" onClick={handleGetStarted}>
+                <Button className="bg-gradient-to-r from-teal-500 to-cyan-600 hover:from-teal-600 hover:to-cyan-700 text-white transition-all duration-300" onClick={handleGetStarted}>
                   Get Started
                 </Button>
               </div>
@@ -71,11 +71,11 @@ export default function Component() {
       </nav>
 
       {/* Hero Section */}
-      <section className="pt-24 pb-16 lg:pt-32 lg:pb-24">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
+      <section className="pt-24 pb-16 lg:pt-32 lg:pb-24 bg-gradient-to-br from-teal-50 to-cyan-50">
+        <div className="max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-16 items-center">
             {/* Hero Content */}
-            <div className="text-center lg:text-left">
+            <div className="text-center lg:text-left lg:col-span-1 max-w-2xl mx-auto lg:mx-0">
               <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold text-gray-900 leading-tight">
                 AI-Driven Multi-Agent <span className="text-teal-600">Accounting Platform</span>
               </h1>
@@ -85,7 +85,7 @@ export default function Component() {
               <div className="mt-8 flex flex-col sm:flex-row gap-4 justify-center lg:justify-start">
                 <Button
                   size="lg"
-                  className="bg-teal-600 hover:bg-teal-700 text-white px-8 py-3"
+                  className="bg-gradient-to-r from-teal-500 to-cyan-600 hover:from-teal-600 hover:to-cyan-700 text-white px-8 py-3 transition-all duration-300"
                   onClick={handleGetStarted}
                 >
                   Get Started
@@ -102,8 +102,8 @@ export default function Component() {
             </div>
 
             {/* Hero Illustration Area */}
-            <div className="flex justify-center lg:justify-end">
-              <div className="w-full max-w-lg h-80 lg:h-96 bg-gradient-to-br from-teal-50 to-gray-50 rounded-2xl border border-gray-200 flex items-center justify-center">
+            <div className="flex justify-center lg:justify-end lg:col-span-2">
+              <div className="w-full h-80 lg:h-96 bg-gradient-to-br from-teal-50 to-gray-50 rounded-2xl border border-gray-200 flex items-center justify-center">
                 <div className="text-center text-gray-400">
                   <Calculator className="h-16 w-16 mx-auto mb-4 text-teal-300" />
                   <p className="text-sm">Illustration placeholder</p>
@@ -115,8 +115,8 @@ export default function Component() {
       </section>
 
       {/* Key Features Section */}
-      <section className="py-16 lg:py-24 bg-gray-50">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <section className="py-16 lg:py-24 bg-gradient-to-br from-gray-50 to-teal-100">
+        <div className="max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8">
           {/* Section Header */}
           <div className="text-center mb-16">
             <h2 className="text-3xl lg:text-4xl font-bold text-gray-900 mb-4">Key Features</h2>
@@ -126,9 +126,9 @@ export default function Component() {
           </div>
 
           {/* Feature Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-12">
             {/* Accounts Payable */}
-            <div className="bg-white rounded-xl p-8 shadow-sm border border-gray-200 text-center">
+            <div className="bg-white rounded-xl p-8 shadow-sm border border-gray-200 text-center hover:scale-105 hover:shadow-xl transition-all duration-300">
               <div className="w-16 h-16 bg-teal-100 rounded-full flex items-center justify-center mx-auto mb-6">
                 <Calculator className="h-8 w-8 text-teal-600" />
               </div>
@@ -140,7 +140,7 @@ export default function Component() {
             </div>
 
             {/* Accounts Receivable */}
-            <div className="bg-white rounded-xl p-8 shadow-sm border border-gray-200 text-center">
+            <div className="bg-white rounded-xl p-8 shadow-sm border border-gray-200 text-center hover:scale-105 hover:shadow-xl transition-all duration-300">
               <div className="w-16 h-16 bg-teal-100 rounded-full flex items-center justify-center mx-auto mb-6">
                 <Users className="h-8 w-8 text-teal-600" />
               </div>
@@ -152,7 +152,7 @@ export default function Component() {
             </div>
 
             {/* AI Assistants */}
-            <div className="bg-white rounded-xl p-8 shadow-sm border border-gray-200 text-center md:col-span-2 lg:col-span-1">
+            <div className="bg-white rounded-xl p-8 shadow-sm border border-gray-200 text-center md:col-span-2 lg:col-span-1 hover:scale-105 hover:shadow-xl transition-all duration-300">
               <div className="w-16 h-16 bg-teal-100 rounded-full flex items-center justify-center mx-auto mb-6">
                 <Bot className="h-8 w-8 text-teal-600" />
               </div>
@@ -168,7 +168,7 @@ export default function Component() {
 
       {/* Footer */}
       <footer className="bg-white border-t border-gray-200 py-12">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="px-4 sm:px-6 lg:px-8">
           <div className="flex flex-col md:flex-row justify-between items-center">
             <div className="flex items-center mb-4 md:mb-0">
               <Calculator className="h-6 w-6 text-teal-600" />
