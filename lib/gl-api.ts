@@ -597,7 +597,7 @@ export async function createJournalEntry(
     journal_type_id: journalTypeId,
     fiscal_period_id: fiscalPeriodId,
     entry_number: `JE-${Date.now()}`, // Simple unique entry number
-    entry_date: new Date(journalEntryData.date).toISOString(), // Format date to ISO 8601 with Z for UTC
+    entry_date: journalEntryData.date, // Send date as string without timezone conversion
     description: journalEntryData.description,
     reference: journalEntryData.reference,
     source: "Frontend", // Source of the entry
@@ -740,7 +740,7 @@ export async function updateJournalEntry(
     journal_type_id: entryData.journal_type_id,
     fiscal_period_id: fiscalPeriodId,
     entry_number: `JE-${Date.now()}-UPD`, // Simple unique entry number for update
-    entry_date: new Date(entryData.date).toISOString(), // Ensure ISO format for update
+    entry_date: entryData.date, // Send date as string without timezone conversion
     description: entryData.description,
     reference: entryData.reference,
     source: "Frontend-Edit", // Source of the entry
