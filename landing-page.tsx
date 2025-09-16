@@ -74,9 +74,9 @@ export default function Component() {
       <section className="pt-24 pb-16 lg:pt-32 lg:pb-24 bg-gradient-to-br from-teal-50 via-cyan-50 to-teal-100 relative overflow-hidden">
         <div className="absolute inset-0 bg-white/20 backdrop-blur-sm"></div>
         <div className="max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-16 items-center">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-12 items-center">
             {/* Hero Content */}
-            <div className="text-center lg:text-left lg:col-span-1 max-w-2xl mx-auto lg:mx-0">
+            <div className="text-center lg:text-left lg:col-span-2 max-w-3xl mx-auto lg:mx-0">
               <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold text-gray-900 leading-tight">
                 AI-Driven Multi-Agent <span className="text-teal-600">Accounting Platform</span>
               </h1>
@@ -103,11 +103,10 @@ export default function Component() {
             </div>
 
             {/* Hero Illustration Area */}
-            <div className="flex justify-center lg:justify-end lg:col-span-2">
-              <div className="w-full h-80 lg:h-96 bg-gradient-to-br from-white/60 to-teal-50/60 backdrop-blur-md rounded-2xl border border-white/20 flex items-center justify-center shadow-2xl hover:shadow-3xl transition-all duration-500">
+            <div className="flex justify-center lg:justify-end lg:col-span-1">
+              <div className="w-full h-64 lg:h-80 bg-gradient-to-br from-white/60 to-teal-50/60 backdrop-blur-md rounded-2xl border border-white/20 flex items-center justify-center shadow-2xl hover:shadow-3xl transition-all duration-500">
                 <div className="text-center text-gray-500">
                   <Calculator className="h-20 w-20 mx-auto mb-4 text-teal-400 animate-pulse" />
-                  <p className="text-sm text-gray-600 font-medium">AI-Powered Accounting</p>
                 </div>
               </div>
             </div>
@@ -116,7 +115,7 @@ export default function Component() {
       </section>
 
       {/* Key Features Section */}
-      <section className="py-16 lg:py-24 bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 border border-white/30 shadow-xl relative overflow-hidden">
+      <section className="py-16 lg:py-24 bg-gradient-to-br from-stone-50 via-neutral-50 to-gray-50 border border-white/30 shadow-xl relative overflow-hidden">
         <div className="absolute inset-0 bg-white/10 backdrop-blur-sm"></div>
         <div className="max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
           {/* Section Header */}
