@@ -48,9 +48,10 @@ export default function ForecastingPage() {
   const fetchForecast = async (date?: Date) => {
     setIsLoading(true)
     const periodToFetch = getPeriod(date || selectedDate); // Use provided date or current selectedDate
+    const horizonDays = timeframe === "7-day" ? 7 : timeframe === "30-day" ? 30 : 90;
     try {
       const response = await fetch(
-        `/api/forecast/latest?tenant_id=${TENANT_ID}&period=${periodToFetch}&metric_type=${metric}`
+        `/api/forecast/latest?tenant_id=${TENANT_ID}&period=${periodToFetch}&metric_type=${metric}&horizon_days=${horizonDays}`
       )
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`)
@@ -85,7 +86,10 @@ export default function ForecastingPage() {
 
   // Get current data based on selected metric and timeframe
   const getCurrentData = () => {
-    return forecastData;
+    if (!forecastData.length) return [];
+
+    const horizonDays = timeframe === "7-day" ? 7 : timeframe === "30-day" ? 30 : 90;
+    return forecastData.slice(0, horizonDays);
   }
 
   // Get chart title based on selected metric

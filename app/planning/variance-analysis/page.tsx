@@ -54,7 +54,7 @@ export default function VarianceAnalysisPage() {
   // Fetch variance data from API
   const fetchVarianceReports = async () => {
     try {
-      const response = await fetch(`/variance-reports?tenant_id=${TENANT_ID}`)
+      const response = await fetch(`/api/variance-reports?tenant_id=${TENANT_ID}`)
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`)
       }
@@ -108,7 +108,7 @@ export default function VarianceAnalysisPage() {
     if (!selectedVariance) return
 
     try {
-      const response = await fetch(`/variance-reports/${selectedVariance.reportId}?tenant_id=${TENANT_ID}`, {
+      const response = await fetch(`/api/variance-reports/${selectedVariance.reportId}?tenant_id=${TENANT_ID}`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
@@ -144,7 +144,7 @@ export default function VarianceAnalysisPage() {
     if (!selectedVariance) return
 
     try {
-      const response = await fetch(`/variance-reports/${selectedVariance.reportId}?tenant_id=${TENANT_ID}`, {
+      const response = await fetch(`/api/variance-reports/${selectedVariance.reportId}?tenant_id=${TENANT_ID}`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',

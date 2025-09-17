@@ -169,8 +169,8 @@ export const CustomersSection = () => {
               <Input
                 id="payment_terms"
                 type="number"
-                value={newCustomer.payment_terms}
-                onChange={(e) => setNewCustomer({ ...newCustomer, payment_terms: parseInt(e.target.value) })}
+                value={newCustomer.payment_terms ?? ""}
+                onChange={(e) => setNewCustomer({ ...newCustomer, payment_terms: parseInt(e.target.value) || 0 })}
                 placeholder="e.g., 30"
               />
             </div>
@@ -179,8 +179,8 @@ export const CustomersSection = () => {
               <Input
                 id="credit_limit"
                 type="number"
-                value={newCustomer.credit_limit}
-                onChange={(e) => setNewCustomer({ ...newCustomer, credit_limit: parseFloat(e.target.value) })}
+                value={newCustomer.credit_limit ?? ""}
+                onChange={(e) => setNewCustomer({ ...newCustomer, credit_limit: parseFloat(e.target.value) || 0 })}
                 placeholder="e.g., 10000"
               />
             </div>

@@ -45,7 +45,13 @@ export const useCustomerManagement = () => {
 
   const handleEditCustomer = () => {
     if (selectedCustomer) {
-      setNewCustomer(selectedCustomer)
+      // Ensure null values are converted to appropriate defaults for form inputs
+      const customerForEdit = {
+        ...selectedCustomer,
+        payment_terms: selectedCustomer.payment_terms ?? 30,
+        credit_limit: selectedCustomer.credit_limit ?? 0,
+      }
+      setNewCustomer(customerForEdit)
       setCustomerView("edit")
     }
   }

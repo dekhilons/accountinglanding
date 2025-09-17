@@ -17,11 +17,11 @@ const nextConfig = {
       },
       // Proxy for the forecasting and variance analysis service
       {
-        source: '/variance-reports/:path*',
+        source: '/api/variance-reports/:path*',
         destination: 'http://localhost:8004/variance-reports/:path*',
       },
       {
-        source: '/forecast/:path*',
+        source: '/api/forecast/:path*',
         destination: 'http://localhost:8004/forecast/:path*',
       },
       {
