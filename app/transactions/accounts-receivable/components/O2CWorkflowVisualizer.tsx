@@ -70,7 +70,7 @@ export const O2CWorkflowVisualizer: React.FC<O2CWorkflowVisualizerProps> = ({
         title: 'Order Approved',
         description: 'Order approved and ready for fulfillment',
         icon: CheckCircle,
-        status: order.status === 'APPROVED' ? 'completed' :
+        status: order.status === 'APPROVED' || order.status === 'FULFILLED' ? 'completed' :
                 order.status === 'REJECTED' ? 'blocked' : 'pending',
         date: order.approval_date,
         details: order.status
@@ -80,7 +80,8 @@ export const O2CWorkflowVisualizer: React.FC<O2CWorkflowVisualizerProps> = ({
         title: 'Fulfillment',
         description: 'Order fulfillment and shipping process',
         icon: Package,
-        status: !order.fulfillment_status || order.fulfillment_status === 'PENDING' ? 'pending' :
+        status: order.status === 'FULFILLED' ? 'completed' :
+                !order.fulfillment_status || order.fulfillment_status === 'PENDING' ? 'pending' :
                 order.fulfillment_status === 'IN_PROGRESS' ? 'in_progress' :
                 ['FULFILLED', 'SHIPPED', 'DELIVERED'].includes(order.fulfillment_status) ? 'completed' : 'pending',
         date: order.fulfillment_date,
@@ -158,6 +159,11 @@ export const O2CWorkflowVisualizer: React.FC<O2CWorkflowVisualizerProps> = ({
   const progressPercentage = getProgressPercentage()
 
   if (!isExpanded) {
+    console.log('Rendering collapsed view with currentStepIndex:', currentStepIndex)
+    console.log('Steps:', steps)
+    console.log('Progress Percentage:', progressPercentage)
+    console.log('Sales Order:', salesOrder)
+    console.log('Customers:', customers)
     // Collapsed view
     return (
       <Card className={`${className} cursor-pointer hover:shadow-lg hover:border-teal-200 transition-all duration-200 border-l-4 ${getStatusColor(steps[currentStepIndex >= 0 ? currentStepIndex : steps.length - 1].status).includes('green') ? 'border-l-green-500' : getStatusColor(steps[currentStepIndex >= 0 ? currentStepIndex : steps.length - 1].status).includes('blue') ? 'border-l-teal-500' : getStatusColor(steps[currentStepIndex >= 0 ? currentStepIndex : steps.length - 1].status).includes('red') ? 'border-l-red-500' : 'border-l-gray-300'}`} onClick={onToggleExpansion}>

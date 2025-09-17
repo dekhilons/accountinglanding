@@ -135,6 +135,11 @@ export default function AccountsPayablePage() {
   const [loadingInvoices, setLoadingInvoices] = useState(true)
   const [errorInvoices, setErrorInvoices] = useState<string | null>(null)
 
+  // Upload polling state
+  const [pendingUploads, setPendingUploads] = useState<Set<string>>(new Set())
+  const [isPolling, setIsPolling] = useState(false)
+  const [recentlyCompleted, setRecentlyCompleted] = useState<Set<string>>(new Set())
+
   // Vendor data for filters
   const [vendors, setVendors] = useState<DwDimVendorResponseSchema[]>([])
   const [loadingVendors, setLoadingVendors] = useState(true)
@@ -316,6 +321,82 @@ export default function AccountsPayablePage() {
     }
   }, [receipts]);
 
+  // Targeted polling effect for upload completion
+  useEffect(() => {
+    if (!isPolling || pendingUploads.size === 0) return
+
+    const pollInterval = setInterval(async () => {
+      try {
+        const fetchedInvoices = await getInvoices("test-tenant")
+        const processedInvoices = fetchedInvoices.map((inv) => ({
+          ...inv,
+          id: inv.action_id,
+          matched: Math.random() > 0.5,
+          exceptions: Math.random() > 0.7 ? ["Mock exception"] : [],
+          confidence: Math.floor(Math.random() * 30) + 70,
+          document_path: `raw/${new Date().toISOString().split('T')[0]}/${inv.documentId}`,
+        }))
+
+        // Check for completed uploads and update state surgically
+        let hasUpdates = false
+        const updatedInvoices = invoices.map((inv) => {
+          if (pendingUploads.has(inv.id) && inv.status === "processing") {
+            const processed = processedInvoices.find((p) => p.documentId === inv.id && p.status !== "processing")
+            if (processed) {
+              hasUpdates = true
+              return processed // Replace with real data
+            }
+          }
+          return inv
+        })
+
+        if (hasUpdates) {
+          setInvoices(updatedInvoices)
+          // Add to recently completed for glow effect
+          setRecentlyCompleted((prev) => {
+            const newSet = new Set(prev)
+            processedInvoices.forEach((p) => {
+              if (pendingUploads.has(p.documentId) && p.status !== "processing") {
+                newSet.add(p.documentId)
+              }
+            })
+            return newSet
+          })
+          // Remove completed uploads from pending set
+          setPendingUploads((prev) => {
+            const newSet = new Set(prev)
+            processedInvoices.forEach((p) => {
+              if (newSet.has(p.documentId) && p.status !== "processing") {
+                newSet.delete(p.documentId)
+              }
+            })
+            return newSet
+          })
+        }
+
+        // Stop polling if no more pending uploads
+        if (pendingUploads.size === 0) {
+          setIsPolling(false)
+        }
+      } catch (error) {
+        console.error("Polling failed:", error)
+        // Optional: Add retry logic or timeout after N failures
+      }
+    }, 2000) // Poll every 2 seconds
+
+    return () => clearInterval(pollInterval)
+  }, [isPolling, pendingUploads, invoices])
+
+  // Clear recently completed glow after 3 seconds
+  useEffect(() => {
+    if (recentlyCompleted.size > 0) {
+      const timeout = setTimeout(() => {
+        setRecentlyCompleted(new Set())
+      }, 3000)
+      return () => clearTimeout(timeout)
+    }
+  }, [recentlyCompleted])
+
 
   // Filter functions
   const filteredInvoices = invoices.filter((invoice) => {
@@ -467,8 +548,38 @@ export default function AccountsPayablePage() {
         title: "Upload Successful",
         description: `Document ${result.documentId} uploaded to ${result.path}`,
       })
-      // Optionally, refresh invoice list after successful upload
-      // fetchInvoicesData();
+
+      // Create temporary "processing" invoice for optimistic UI
+      const tempInvoice: APInvoice = {
+        id: result.documentId, // Use documentId as id for matching
+        action_id: result.documentId,
+        documentId: result.documentId,
+        invoiceNumber: "Processing...", // Placeholder
+        vendorName: "Processing...",
+        vendorId: "",
+        purchaseOrderNumber: "",
+        invoiceDate: new Date().toISOString().split('T')[0], // Current date
+        total: 0,
+        currency: "USD",
+        status: "processing", // Triggers skeleton
+        lineItems: [],
+        tenant_id: "test-tenant",
+        created_at: new Date().toISOString(),
+        issues: [],
+        matched: false,
+        exceptions: [],
+        confidence: 0,
+        document_path: result.path,
+      }
+
+      // Add to invoices state (optimistic update)
+      setInvoices((prev) => [tempInvoice, ...prev])
+
+      // Add to pending uploads for targeted polling
+      setPendingUploads((prev) => new Set(prev).add(result.documentId))
+
+      // Start polling for completion
+      setIsPolling(true)
     } catch (error) {
       console.error("Upload failed:", error)
       toast({
@@ -868,8 +979,10 @@ export default function AccountsPayablePage() {
                           <div
                             key={invoice.id}
                             className={`p-4 border rounded-lg cursor-pointer hover:bg-gray-50 ${
-                              selectedItem?.id === invoice.id ? "border-teal-500 bg-teal-50" : ""
-                            }`}
+                              invoice.status === "processing" ? "animate-pulse bg-gray-100 opacity-70" : ""
+                            } ${
+                              recentlyCompleted.has(invoice.documentId) ? "ring-2 ring-green-400" : ""
+                            } ${selectedItem?.id === invoice.id ? "border-teal-500 bg-teal-50" : ""}`}
                             onClick={() => handleItemSelect(invoice)}
                           >
                             <div className="flex items-center justify-between">
@@ -930,7 +1043,11 @@ export default function AccountsPayablePage() {
                           {filteredInvoices.map((invoice) => (
                             <TableRow
                               key={invoice.id}
-                              className="cursor-pointer hover:bg-gray-50"
+                              className={`cursor-pointer hover:bg-gray-50 ${
+                                invoice.status === "processing" ? "animate-pulse bg-gray-100 opacity-70" : ""
+                              } ${
+                                recentlyCompleted.has(invoice.documentId) ? "ring-2 ring-green-400" : ""
+                              }`}
                               onClick={() => handleItemSelect(invoice)}
                             >
                               <TableCell className="font-medium">{invoice.invoiceNumber}</TableCell>
